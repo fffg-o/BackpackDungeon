@@ -1,0 +1,16 @@
+node_modules/
+.next/
+out/
+dist/
+dist-tests/
+coverage/
+.turbo/
+
+.anchor/
+target/
+
+.env
+.env.local
+.env.*.local
+
+*.log

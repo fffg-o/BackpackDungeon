@@ -1,0 +1,16 @@
+{
+  "name": "backpack-dungeon",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "build": "pnpm -r --workspace-concurrency=1 build",
+    "test": "pnpm -r --if-present test",
+    "dev:web": "pnpm --filter @backpack-dungeon/web dev",
+    "anchor:test": "NO_DNA=1 anchor test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}
