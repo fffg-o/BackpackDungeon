@@ -11,10 +11,7 @@
         "name": "next"
       }
     ],
-    "paths": {
-      "@backpack-dungeon/shared": ["../../packages/shared/src/index.ts"],
-      "@backpack-dungeon/game-core": ["../../packages/game-core/src/index.ts"]
-    }
+    "paths": {}
   },
   "include": [
     "next-env.d.ts",

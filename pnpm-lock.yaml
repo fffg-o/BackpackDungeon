@@ -17,6 +17,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@backpack-dungeon/cnft-adapter':
+        specifier: workspace:*
+        version: link:../../packages/cnft-adapter
       '@backpack-dungeon/game-core':
         specifier: workspace:*
         version: link:../../packages/game-core
@@ -39,6 +42,19 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.2.3(@types/react@19.2.14)
+      typescript:
+        specifier: ^5.8.0
+        version: 5.9.3
+
+  packages/cnft-adapter:
+    dependencies:
+      '@backpack-dungeon/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.12.2
       typescript:
         specifier: ^5.8.0
         version: 5.9.3

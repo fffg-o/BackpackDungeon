@@ -293,7 +293,7 @@ function pickOpenPosition(
   return findOpenPosition(cellSeed, width, height, occupied);
 }
 
-function findOpenPosition(
+export function findOpenPosition(
   seed: string,
   width: number,
   height: number,
@@ -306,7 +306,7 @@ function findOpenPosition(
   const area = width * height;
   const startLinear = start.y * width + start.x;
 
-  for (let offset = 0; offset <= occupied.size; offset += 1) {
+  for (let offset = 0; offset < area; offset += 1) {
     const linear = (startLinear + offset) % area;
     const position = {
       x: linear % width,

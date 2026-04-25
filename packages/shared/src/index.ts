@@ -115,10 +115,29 @@ export const PACKRUN_REWARD_TIERS = Object.freeze([
 ] as const);
 
 export const PACKRUN_PDA_SEEDS = Object.freeze({
-  dailyDungeon: "daily_dungeon",
-  playerRun: "player_run",
-  runNft: "run_nft"
+  dailyDungeon: "dungeon",
+  location: "location",
+  enemyLocation: "enemy",
+  shop: "shop",
+  bossLocation: "boss",
+  playerRun: "run",
+  bossShard: "boss_shard",
+  bossContribution: "boss_contribution",
+  shopItemSlot: "shop_slot",
+  dailyRewardClaim: "daily_claim",
+  bossNftClaim: "boss_nft_claim"
 } as const);
+
+export type PackrunPdaSeeds = readonly Uint8Array[];
+
+export type PackrunPublicKeyInput =
+  | Uint8Array
+  | {
+      readonly toBytes: () => Uint8Array;
+    }
+  | {
+      readonly toBuffer: () => Uint8Array;
+    };
 
 export type CanonicalJsonValue =
   | null
@@ -133,8 +152,11 @@ export function canonicalJson(value: CanonicalJsonValue): string {
 }
 
 export function sha256Hex(input: string | Uint8Array): string {
-  const bytes = typeof input === "string" ? new TextEncoder().encode(input) : input;
-  return bytesToHex(sha256(bytes));
+  return bytesToHex(typeof input === "string" ? sha256Bytes(input) : sha256(input));
+}
+
+export function sha256Bytes(input: string): Uint8Array {
+  return sha256(encodeUtf8(input));
 }
 
 export function hashCanonicalJson(value: CanonicalJsonValue): string {
@@ -142,7 +164,52 @@ export function hashCanonicalJson(value: CanonicalJsonValue): string {
 }
 
 export function packrunPdaSeed(prefix: keyof typeof PACKRUN_PDA_SEEDS): Uint8Array {
-  return new TextEncoder().encode(PACKRUN_PDA_SEEDS[prefix]);
+  return encodeUtf8(PACKRUN_PDA_SEEDS[prefix]);
+}
+
+export function dailyDungeonPda(dayId: DayId): PackrunPdaSeeds {
+  return [packrunPdaSeed("dailyDungeon"), encodeUtf8(dayId)];
+}
+
+export function locationPda(dayId: DayId, poiIdHash: Uint8Array): PackrunPdaSeeds {
+  return [packrunPdaSeed("location"), encodeUtf8(dayId), bytes32Seed(poiIdHash, "poiIdHash")];
+}
+
+export function enemyLocationPda(dayId: DayId, poiIdHash: Uint8Array): PackrunPdaSeeds {
+  return [packrunPdaSeed("enemyLocation"), encodeUtf8(dayId), bytes32Seed(poiIdHash, "poiIdHash")];
+}
+
+export function shopPda(dayId: DayId, poiIdHash: Uint8Array): PackrunPdaSeeds {
+  return [packrunPdaSeed("shop"), encodeUtf8(dayId), bytes32Seed(poiIdHash, "poiIdHash")];
+}
+
+export function bossLocationPda(dayId: DayId, poiIdHash: Uint8Array): PackrunPdaSeeds {
+  return [packrunPdaSeed("bossLocation"), encodeUtf8(dayId), bytes32Seed(poiIdHash, "poiIdHash")];
+}
+
+export function playerRunPda(dayId: DayId, player: PackrunPublicKeyInput): PackrunPdaSeeds {
+  return [packrunPdaSeed("playerRun"), encodeUtf8(dayId), publicKeySeed(player, "player")];
+}
+
+export function shopItemSlotPda(
+  dayId: DayId,
+  poiIdHash: Uint8Array,
+  slotIndex: number
+): PackrunPdaSeeds {
+  return [
+    packrunPdaSeed("shopItemSlot"),
+    encodeUtf8(dayId),
+    bytes32Seed(poiIdHash, "poiIdHash"),
+    u16Seed(slotIndex, "slotIndex")
+  ];
+}
+
+export function bossShardPda(dayId: DayId, shardIndex: number): PackrunPdaSeeds {
+  return [packrunPdaSeed("bossShard"), encodeUtf8(dayId), u16Seed(shardIndex, "shardIndex")];
+}
+
+export function bossNftClaimPda(dayId: DayId, player: PackrunPublicKeyInput): PackrunPdaSeeds {
+  return [packrunPdaSeed("bossNftClaim"), encodeUtf8(dayId), publicKeySeed(player, "player")];
 }
 
 function toCanonicalValue(value: CanonicalJsonValue): unknown {
@@ -172,6 +239,46 @@ function toCanonicalValue(value: CanonicalJsonValue): unknown {
   }
 
   return canonicalObject;
+}
+
+function encodeUtf8(value: string): Uint8Array {
+  return new TextEncoder().encode(value);
+}
+
+function publicKeySeed(value: PackrunPublicKeyInput, name: string): Uint8Array {
+  let seed: Uint8Array;
+
+  if (value instanceof Uint8Array) {
+    seed = value;
+  } else if ("toBytes" in value) {
+    seed = value.toBytes();
+  } else {
+    seed = value.toBuffer();
+  }
+
+  if (seed.length !== 32) {
+    throw new RangeError(`${name} must be a 32-byte public key.`);
+  }
+
+  return new Uint8Array(seed);
+}
+
+function bytes32Seed(value: Uint8Array, name: string): Uint8Array {
+  if (value.length !== 32) {
+    throw new RangeError(`${name} must be 32 bytes.`);
+  }
+
+  return new Uint8Array(value);
+}
+
+function u16Seed(value: number, name: string): Uint8Array {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
+    throw new RangeError(`${name} must be an unsigned 16-bit integer.`);
+  }
+
+  const seed = new Uint8Array(2);
+  new DataView(seed.buffer).setUint16(0, value, true);
+  return seed;
 }
 
 const SHA256_INITIAL_STATE = new Uint32Array([

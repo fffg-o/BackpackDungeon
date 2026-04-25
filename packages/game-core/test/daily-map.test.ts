@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { LocationKind } from "@backpack-dungeon/shared";
 import {
+  findOpenPosition,
   generateDailyMap,
+  randomRange,
   type DailyLocationSpec,
   type DailyMapInput
 } from "../src/index.js";
@@ -83,6 +85,33 @@ test("shops and enemies are spread across the map", () => {
   assert.ok(shopQuadrants.size >= 2);
   assert.ok(enemyQuadrants.size >= 3);
 });
+
+test("findOpenPosition scans the full map area", () => {
+  const seed = "full-scan-regression";
+  const width = 8;
+  const height = 1;
+  const startLinear = randomRange(seed, 100_000, 0, width - 1);
+  const openLinear = (startLinear + 5) % width;
+  const occupied = new UnderreportedOccupied();
+
+  for (let linear = 0; linear < width; linear += 1) {
+    if (linear !== openLinear) {
+      occupied.add(`${linear},0`);
+    }
+  }
+
+  assert.equal(occupied.size, 1);
+  assert.deepEqual(findOpenPosition(seed, width, height, occupied), {
+    x: openLinear,
+    y: 0
+  });
+});
+
+class UnderreportedOccupied extends Set<string> {
+  override get size(): number {
+    return 1;
+  }
+}
 
 function countKind(locations: readonly DailyLocationSpec[], kind: LocationKind): number {
   return locations.filter((location) => location.kind === kind).length;

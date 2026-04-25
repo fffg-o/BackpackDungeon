@@ -44,3 +44,27 @@ p {
   color: #b8c0c7;
   line-height: 1.6;
 }
+
+/* Navigation */
+.nav {
+  display: flex;
+  gap: 8px;
+  padding: 12px 24px;
+  background: #121416;
+  border-bottom: 1px solid #1e2226;
+}
+
+.navLink {
+  color: #8a929a;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+
+.navLink:hover {
+  color: #f2f4f6;
+  background: #1a1e22;
+}

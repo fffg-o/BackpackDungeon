@@ -5,11 +5,15 @@ declare_id!("AKGsUEW5WUdUQ6vWVkWWLF4CosWHfWTPMsfckWKTpvtL");
 
 pub const DAILY_DUNGEON_SEED: &[u8] = b"dungeon";
 pub const LOCATION_SEED: &[u8] = b"location";
+pub const ENEMY_LOCATION_SEED: &[u8] = b"enemy";
+pub const SHOP_SEED: &[u8] = b"shop";
+pub const BOSS_LOCATION_SEED: &[u8] = b"boss";
 pub const PLAYER_RUN_SEED: &[u8] = b"run";
 pub const BOSS_SHARD_SEED: &[u8] = b"boss_shard";
 pub const BOSS_CONTRIBUTION_SEED: &[u8] = b"boss_contribution";
 pub const SHOP_ITEM_SLOT_SEED: &[u8] = b"shop_slot";
 pub const DAILY_REWARD_CLAIM_SEED: &[u8] = b"daily_claim";
+pub const BOSS_NFT_CLAIM_SEED: &[u8] = b"boss_nft_claim";
 
 pub const DAY_ID_MAX_LEN: usize = 16;
 pub const POI_ID_MAX_LEN: usize = 64;
@@ -23,18 +27,33 @@ pub const DEFAULT_ENEMY_CLEAR_ENERGY_COST: u16 = 5;
 pub const DEFAULT_ENEMY_BASE_COOLDOWN_SECONDS: i64 = 60;
 pub const DEFAULT_DAILY_ENEMY_CLEAR_LIMIT: u32 = 100;
 pub const DEFAULT_VALUABLE_CLEAR_CAP: u16 = 5;
+pub const DEFAULT_RARE_ELIGIBILITY_POINTS_PER_CLEAR: u32 = 1;
 pub const MAX_MERKLE_PROOF_LEN: usize = 32;
+pub const MAX_BOSS_DAMAGE_PER_SUBMISSION: u64 = 10_000;
+pub const MAX_BOSS_SUBMISSIONS_PER_PLAYER: u16 = 10;
+pub const MINIMUM_BOSS_DAMAGE: u64 = 1;
+
+/// Basis points denominator (100% = 10_000 bps).
+pub const BPS_DENOMINATOR: u64 = 10_000;
+/// Price increase per restock event (1200 bps = 12%).
+pub const DEFAULT_RESTOCK_PRICE_INCREASE_BPS: u64 = 1_200;
+/// Price increase per item sold (400 bps = 4%).
+pub const DEFAULT_SOLD_PRICE_INCREASE_BPS: u64 = 400;
+/// Player inventory counters added on purchase.
+pub const DEFAULT_ITEMS_PURCHASED_PER_BUY: u32 = 1;
 
 pub const DAILY_DUNGEON_SPACE: usize = 8 + DailyDungeon::INIT_SPACE;
 pub const LOCATION_ACCOUNT_SPACE: usize = 8 + LocationAccount::INIT_SPACE;
 pub const ENEMY_LOCATION_SPACE: usize = 8 + EnemyLocation::INIT_SPACE;
 pub const SHOP_ACCOUNT_SPACE: usize = 8 + ShopAccount::INIT_SPACE;
+pub const BOSS_LOCATION_SPACE: usize = 8 + BossLocation::INIT_SPACE;
 pub const SHOP_ITEM_SLOT_ACCOUNT_SPACE: usize = 8 + ShopItemSlotAccount::INIT_SPACE;
 pub const PLAYER_RUN_SPACE: usize = 8 + PlayerRun::INIT_SPACE;
 pub const BOSS_DAMAGE_SHARD_SPACE: usize = 8 + BossDamageShard::INIT_SPACE;
 pub const PLAYER_BOSS_CONTRIBUTION_SPACE: usize = 8 + PlayerBossContribution::INIT_SPACE;
 pub const REWARD_POOL_SPACE: usize = 8 + RewardPool::INIT_SPACE;
 pub const DAILY_REWARD_CLAIM_SPACE: usize = 8 + DailyRewardClaim::INIT_SPACE;
+pub const BOSS_NFT_CLAIM_SPACE: usize = 8 + BossNftClaim::INIT_SPACE;
 
 #[program]
 pub mod packrun {
@@ -126,6 +145,7 @@ pub mod packrun {
         location.daily_dungeon = ctx.accounts.daily_dungeon.key();
         location.day_id = spec.day_id.clone();
         location.poi_id = spec.poi_id.clone();
+        location.poi_id_hash = spec.poi_id_hash;
         location.kind = spec.kind;
         location.status = LocationStatus::Available;
         location.x = spec.x;
@@ -145,7 +165,7 @@ pub mod packrun {
                     .as_mut()
                     .ok_or(error!(PackrunError::MissingLocationDetail))?;
                 require!(
-                    ctx.accounts.shop_account.is_none(),
+                    ctx.accounts.shop_account.is_none() && ctx.accounts.boss_location.is_none(),
                     PackrunError::UnexpectedLocationDetail
                 );
 
@@ -163,6 +183,10 @@ pub mod packrun {
                 enemy_location.clear_count = 0;
                 enemy_location.base_cooldown_seconds = DEFAULT_ENEMY_BASE_COOLDOWN_SECONDS;
                 enemy_location.next_available_at = 0;
+                enemy_location.bump = ctx
+                    .bumps
+                    .enemy_location
+                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
                 ctx.accounts.daily_dungeon.enemy_count =
                     ctx.accounts.daily_dungeon.enemy_count.saturating_add(1);
             }
@@ -177,7 +201,7 @@ pub mod packrun {
                     .as_mut()
                     .ok_or(error!(PackrunError::MissingLocationDetail))?;
                 require!(
-                    ctx.accounts.enemy_location.is_none(),
+                    ctx.accounts.enemy_location.is_none() && ctx.accounts.boss_location.is_none(),
                     PackrunError::UnexpectedLocationDetail
                 );
 
@@ -187,20 +211,48 @@ pub mod packrun {
                 shop_account.keeper_name = shop.keeper_name.clone().unwrap_or_default();
                 shop_account.slot_count = shop.item_slots.len() as u16;
                 shop_account.opened_at = Clock::get()?.unix_timestamp;
+                shop_account.bump = ctx
+                    .bumps
+                    .shop_account
+                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
                 ctx.accounts.daily_dungeon.shop_count =
                     ctx.accounts.daily_dungeon.shop_count.saturating_add(1);
             }
             LocationKind::Boss => {
+                let boss = spec
+                    .boss
+                    .as_ref()
+                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
+                let boss_location = ctx
+                    .accounts
+                    .boss_location
+                    .as_mut()
+                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
                 require!(
                     ctx.accounts.enemy_location.is_none() && ctx.accounts.shop_account.is_none(),
                     PackrunError::UnexpectedLocationDetail
                 );
+                boss_location.location = location.key();
+                boss_location.day_id = spec.day_id.clone();
+                boss_location.poi_id = spec.poi_id.clone();
+                boss_location.boss_id = boss.id.clone();
+                boss_location.name = boss.name.clone();
+                boss_location.level = boss.level;
+                boss_location.base_hp = boss.max_health;
+                boss_location.base_damage = boss.attack;
+                boss_location.reward_tier = boss.reward_tier;
+                boss_location.bump = ctx
+                    .bumps
+                    .boss_location
+                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
                 ctx.accounts.daily_dungeon.boss_count =
                     ctx.accounts.daily_dungeon.boss_count.saturating_add(1);
             }
             LocationKind::Treasure => {
                 require!(
-                    ctx.accounts.enemy_location.is_none() && ctx.accounts.shop_account.is_none(),
+                    ctx.accounts.enemy_location.is_none()
+                        && ctx.accounts.shop_account.is_none()
+                        && ctx.accounts.boss_location.is_none(),
                     PackrunError::UnexpectedLocationDetail
                 );
                 ctx.accounts.daily_dungeon.treasure_count =
@@ -208,7 +260,9 @@ pub mod packrun {
             }
             LocationKind::Event => {
                 require!(
-                    ctx.accounts.enemy_location.is_none() && ctx.accounts.shop_account.is_none(),
+                    ctx.accounts.enemy_location.is_none()
+                        && ctx.accounts.shop_account.is_none()
+                        && ctx.accounts.boss_location.is_none(),
                     PackrunError::UnexpectedLocationDetail
                 );
             }
@@ -218,6 +272,49 @@ pub mod packrun {
         ctx.accounts.daily_dungeon.location_count =
             ctx.accounts.daily_dungeon.location_count.saturating_add(1);
         ctx.accounts.daily_dungeon.updated_at = now;
+
+        Ok(())
+    }
+
+    pub fn init_shop_item_slot(
+        ctx: Context<InitShopItemSlot>,
+        day_id: String,
+        poi_id: String,
+        poi_id_hash: [u8; 32],
+        slot_index: u16,
+        slot: ShopItemSlotSpecInput,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        validate_init_shop_item_slot(
+            &ctx.accounts.daily_dungeon,
+            &ctx.accounts.location_account,
+            &ctx.accounts.shop_account,
+            ctx.accounts.location_account.key(),
+            &day_id,
+            &poi_id,
+            poi_id_hash,
+            slot_index,
+            &slot,
+            now,
+        )?;
+
+        let shop_item_slot = &mut ctx.accounts.shop_item_slot;
+        shop_item_slot.shop = ctx.accounts.shop_account.key();
+        shop_item_slot.day_id = day_id;
+        shop_item_slot.poi_id = poi_id;
+        shop_item_slot.poi_id_hash = poi_id_hash;
+        shop_item_slot.slot_index = slot_index;
+        shop_item_slot.item_id = slot.item_id;
+        shop_item_slot.reward_tier = slot.reward_tier;
+        shop_item_slot.base_price = slot.price;
+        shop_item_slot.base_stock = slot.base_stock;
+        shop_item_slot.max_stock = slot.max_stock;
+        shop_item_slot.sold_count = 0;
+        shop_item_slot.restock_interval_seconds = slot.restock_interval_seconds;
+        shop_item_slot.max_restock_count = slot.max_restock_count;
+        shop_item_slot.per_wallet_daily_limit = slot.per_wallet_daily_limit;
+        shop_item_slot.opened_at = now;
+        shop_item_slot.bump = ctx.bumps.shop_item_slot;
 
         Ok(())
     }
@@ -237,10 +334,13 @@ pub mod packrun {
             now,
         )?;
 
+        // In the MVP, battle_result_hash, proof_uri_hash, and the performance
+        // summary are self-reported. They stay as replay/UI hints; reward
+        // eligibility is computed only from on-chain clear state.
+        let _ = player_performance_summary;
         let outcome = apply_clear_enemy_state(
             &mut ctx.accounts.enemy_location,
             &mut ctx.accounts.player_run,
-            &player_performance_summary,
             now,
         )?;
 
@@ -257,6 +357,159 @@ pub mod packrun {
             poi_id: ctx.accounts.location_account.poi_id.clone(),
             proof_uri_hash,
             rare_eligibility_points_awarded: outcome.rare_eligibility_points_awarded,
+        });
+
+        Ok(())
+    }
+
+    pub fn buy_item(
+        ctx: Context<BuyItem>,
+        slot_index: u16,
+        expected_price: u64,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        validate_buy_item(
+            &ctx.accounts.daily_dungeon,
+            &ctx.accounts.location_account,
+            ctx.accounts.shop_account.key(),
+            &ctx.accounts.shop_item_slot,
+            &ctx.accounts.player_run,
+            slot_index,
+            expected_price,
+            now,
+        )?;
+
+        apply_buy_item_state(
+            &mut ctx.accounts.shop_item_slot,
+            &mut ctx.accounts.player_run,
+            now,
+        )?;
+
+        emit!(ItemPurchased {
+            day_id: ctx.accounts.daily_dungeon.day_id.clone(),
+            player: ctx.accounts.player.key(),
+            location: ctx.accounts.location_account.key(),
+            shop: ctx.accounts.shop_account.key(),
+            shop_item_slot: ctx.accounts.shop_item_slot.key(),
+            slot_index,
+            poi_id: ctx.accounts.location_account.poi_id.clone(),
+            item_id: ctx.accounts.shop_item_slot.item_id.clone(),
+            price: expected_price,
+            sold_count: ctx.accounts.shop_item_slot.sold_count,
+            player_item_count: ctx.accounts.player_run.items_purchased,
+        });
+
+        Ok(())
+    }
+
+    pub fn submit_boss_damage(
+        ctx: Context<SubmitBossDamage>,
+        damage_score: u64,
+        boss_battle_hash: [u8; 32],
+        _shard_index: u16,
+        proof_uri_hash: Option<[u8; 32]>,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        validate_submit_boss_damage(
+            &ctx.accounts.daily_dungeon,
+            &ctx.accounts.location_account,
+            &ctx.accounts.player_run,
+            &ctx.accounts.boss_damage_shard,
+            &ctx.accounts.player_boss_contribution,
+            ctx.accounts.player.key(),
+            ctx.accounts.boss_location.key(),
+            ctx.accounts.daily_dungeon.boss_shard_count,
+            damage_score,
+            now,
+        )?;
+
+        apply_submit_boss_damage(
+            &mut ctx.accounts.boss_damage_shard,
+            &mut ctx.accounts.player_boss_contribution,
+            &mut ctx.accounts.player_run,
+            damage_score,
+            now,
+        )?;
+
+        emit!(BossDamageSubmitted {
+            day_id: ctx.accounts.daily_dungeon.day_id.clone(),
+            player: ctx.accounts.player.key(),
+            boss_location: ctx.accounts.boss_location.key(),
+            shard_index: ctx.accounts.boss_damage_shard.shard_index,
+            damage_score,
+            boss_battle_hash,
+            proof_uri_hash,
+            total_damage: ctx.accounts.boss_damage_shard.total_damage,
+            participant_count: ctx.accounts.boss_damage_shard.participant_count,
+            player_total_damage: ctx.accounts.player_boss_contribution.total_damage,
+        });
+
+        Ok(())
+    }
+
+    pub fn claim_boss_participation_nft(ctx: Context<ClaimBossParticipationNft>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        validate_claim_boss_participation_nft(
+            &ctx.accounts.daily_dungeon,
+            &ctx.accounts.boss_location,
+            &ctx.accounts.player_boss_contribution,
+            &ctx.accounts.boss_nft_claim,
+            ctx.accounts.player.key(),
+        )?;
+
+        apply_claim_boss_participation_nft(
+            &mut ctx.accounts.boss_nft_claim,
+            &ctx.accounts.daily_dungeon,
+            &ctx.accounts.boss_location,
+            &ctx.accounts.player_boss_contribution,
+            ctx.accounts.player.key(),
+            now,
+        )?;
+
+        emit!(BossNftClaimed {
+            day_id: ctx.accounts.daily_dungeon.day_id.clone(),
+            boss_id: ctx.accounts.boss_location.boss_id.clone(),
+            player: ctx.accounts.player.key(),
+            player_damage: ctx.accounts.player_boss_contribution.total_damage,
+            shard_index: ctx.accounts.player_boss_contribution.shard_index,
+            total_damage_snapshot: ctx.accounts.boss_damage_shard.total_damage,
+            boss_location: ctx.accounts.boss_location.key(),
+        });
+
+        Ok(())
+    }
+
+    pub fn claim_daily_reward(ctx: Context<ClaimDailyReward>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        validate_claim_daily_reward(
+            &ctx.accounts.daily_dungeon,
+            &ctx.accounts.player_run,
+            &ctx.accounts.daily_reward_claim,
+            ctx.accounts.player.key(),
+            ctx.accounts.daily_dungeon.key(),
+            now,
+        )?;
+
+        let reward_tier = compute_daily_reward_tier(
+            &ctx.accounts.daily_dungeon,
+            &ctx.accounts.player_run,
+        )?;
+
+        apply_claim_daily_reward(
+            &mut ctx.accounts.daily_reward_claim,
+            &ctx.accounts.daily_dungeon,
+            reward_tier,
+            ctx.accounts.player.key(),
+            now,
+        )?;
+
+        emit!(DailyRewardClaimed {
+            day_id: ctx.accounts.daily_dungeon.day_id.clone(),
+            player: ctx.accounts.player.key(),
+            reward_tier,
+            cleared_locations: ctx.accounts.player_run.cleared_locations,
+            boss_damage: ctx.accounts.player_run.boss_damage,
+            claimed_at: now,
         });
 
         Ok(())
@@ -318,14 +571,78 @@ pub struct InitLocationFromMerkle<'info> {
         init,
         payer = authority,
         space = LOCATION_ACCOUNT_SPACE,
-        seeds = [LOCATION_SEED, spec.day_id.as_bytes(), spec.poi_id.as_bytes()],
+        seeds = [LOCATION_SEED, spec.day_id.as_bytes(), spec.poi_id_hash.as_ref()],
         bump
     )]
     pub location_account: Account<'info, LocationAccount>,
-    #[account(init, payer = authority, space = ENEMY_LOCATION_SPACE)]
+    #[account(
+        init,
+        payer = authority,
+        space = ENEMY_LOCATION_SPACE,
+        seeds = [ENEMY_LOCATION_SEED, spec.day_id.as_bytes(), spec.poi_id_hash.as_ref()],
+        bump
+    )]
     pub enemy_location: Option<Account<'info, EnemyLocation>>,
-    #[account(init, payer = authority, space = SHOP_ACCOUNT_SPACE)]
+    #[account(
+        init,
+        payer = authority,
+        space = SHOP_ACCOUNT_SPACE,
+        seeds = [SHOP_SEED, spec.day_id.as_bytes(), spec.poi_id_hash.as_ref()],
+        bump
+    )]
     pub shop_account: Option<Account<'info, ShopAccount>>,
+    #[account(
+        init,
+        payer = authority,
+        space = BOSS_LOCATION_SPACE,
+        seeds = [BOSS_LOCATION_SEED, spec.day_id.as_bytes(), spec.poi_id_hash.as_ref()],
+        bump
+    )]
+    pub boss_location: Option<Account<'info, BossLocation>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(
+    day_id: String,
+    poi_id: String,
+    poi_id_hash: [u8; 32],
+    slot_index: u16,
+    slot: ShopItemSlotSpecInput
+)]
+pub struct InitShopItemSlot<'info> {
+    #[account(
+        seeds = [DAILY_DUNGEON_SEED, day_id.as_bytes()],
+        bump = daily_dungeon.bump
+    )]
+    pub daily_dungeon: Account<'info, DailyDungeon>,
+    #[account(
+        seeds = [LOCATION_SEED, day_id.as_bytes(), poi_id_hash.as_ref()],
+        bump = location_account.bump,
+        constraint = location_account.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.day_id == day_id @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.poi_id == poi_id @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.poi_id_hash == poi_id_hash @ PackrunError::InvalidLocationAccount
+    )]
+    pub location_account: Account<'info, LocationAccount>,
+    #[account(
+        seeds = [SHOP_SEED, day_id.as_bytes(), poi_id_hash.as_ref()],
+        bump = shop_account.bump,
+        constraint = shop_account.location == location_account.key() @ PackrunError::InvalidShopAccount,
+        constraint = shop_account.day_id == day_id @ PackrunError::InvalidShopAccount,
+        constraint = shop_account.poi_id == poi_id @ PackrunError::InvalidShopAccount
+    )]
+    pub shop_account: Account<'info, ShopAccount>,
+    #[account(
+        init,
+        payer = payer,
+        space = SHOP_ITEM_SLOT_ACCOUNT_SPACE,
+        seeds = [SHOP_ITEM_SLOT_SEED, day_id.as_bytes(), poi_id_hash.as_ref(), &slot_index.to_le_bytes()],
+        bump
+    )]
+    pub shop_item_slot: Account<'info, ShopItemSlotAccount>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -346,18 +663,195 @@ pub struct ClearEnemy<'info> {
     )]
     pub player_run: Account<'info, PlayerRun>,
     #[account(
-        seeds = [LOCATION_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id.as_bytes()],
+        seeds = [LOCATION_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref()],
         bump = location_account.bump,
         constraint = location_account.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidLocationAccount
     )]
     pub location_account: Account<'info, LocationAccount>,
     #[account(
         mut,
+        seeds = [ENEMY_LOCATION_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref()],
+        bump = enemy_location.bump,
         constraint = enemy_location.location == location_account.key() @ PackrunError::InvalidEnemyLocation,
         constraint = enemy_location.day_id == daily_dungeon.day_id @ PackrunError::InvalidEnemyLocation,
         constraint = enemy_location.poi_id == location_account.poi_id @ PackrunError::InvalidEnemyLocation
     )]
     pub enemy_location: Account<'info, EnemyLocation>,
+}
+
+#[derive(Accounts)]
+#[instruction(slot_index: u16, expected_price: u64)]
+pub struct BuyItem<'info> {
+    pub player: Signer<'info>,
+    #[account(
+        seeds = [DAILY_DUNGEON_SEED, daily_dungeon.day_id.as_bytes()],
+        bump = daily_dungeon.bump
+    )]
+    pub daily_dungeon: Account<'info, DailyDungeon>,
+    #[account(
+        mut,
+        seeds = [PLAYER_RUN_SEED, daily_dungeon.day_id.as_bytes(), player.key().as_ref()],
+        bump = player_run.bump,
+        constraint = player_run.player == player.key() @ PackrunError::InvalidPlayerRun,
+        constraint = player_run.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidPlayerRun
+    )]
+    pub player_run: Account<'info, PlayerRun>,
+    #[account(
+        seeds = [LOCATION_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref()],
+        bump = location_account.bump,
+        constraint = location_account.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidLocationAccount
+    )]
+    pub location_account: Account<'info, LocationAccount>,
+    #[account(
+        seeds = [SHOP_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref()],
+        bump = shop_account.bump,
+        constraint = shop_account.location == location_account.key() @ PackrunError::InvalidShopAccount,
+        constraint = shop_account.day_id == daily_dungeon.day_id @ PackrunError::InvalidShopAccount,
+        constraint = shop_account.poi_id == location_account.poi_id @ PackrunError::InvalidShopAccount
+    )]
+    pub shop_account: Account<'info, ShopAccount>,
+    #[account(
+        mut,
+        seeds = [SHOP_ITEM_SLOT_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref(), &slot_index.to_le_bytes()],
+        bump = shop_item_slot.bump,
+        constraint = shop_item_slot.shop == shop_account.key() @ PackrunError::InvalidShopItemSlot,
+        constraint = shop_item_slot.day_id == daily_dungeon.day_id @ PackrunError::InvalidShopItemSlot,
+        constraint = shop_item_slot.poi_id == location_account.poi_id @ PackrunError::InvalidShopItemSlot,
+        constraint = shop_item_slot.poi_id_hash == location_account.poi_id_hash @ PackrunError::InvalidShopItemSlot,
+        constraint = shop_item_slot.slot_index == slot_index @ PackrunError::InvalidShopItemSlot
+    )]
+    pub shop_item_slot: Account<'info, ShopItemSlotAccount>,
+}
+
+#[derive(Accounts)]
+#[instruction(damage_score: u64, boss_battle_hash: [u8; 32], shard_index: u16)]
+pub struct SubmitBossDamage<'info> {
+    #[account(mut)]
+    pub player: Signer<'info>,
+    #[account(
+        seeds = [DAILY_DUNGEON_SEED, daily_dungeon.day_id.as_bytes()],
+        bump = daily_dungeon.bump
+    )]
+    pub daily_dungeon: Account<'info, DailyDungeon>,
+    #[account(
+        mut,
+        seeds = [PLAYER_RUN_SEED, daily_dungeon.day_id.as_bytes(), player.key().as_ref()],
+        bump = player_run.bump,
+        constraint = player_run.player == player.key() @ PackrunError::InvalidPlayerRun,
+        constraint = player_run.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidPlayerRun
+    )]
+    pub player_run: Account<'info, PlayerRun>,
+    #[account(
+        seeds = [LOCATION_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref()],
+        bump = location_account.bump,
+        constraint = location_account.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidLocationAccount
+    )]
+    pub location_account: Account<'info, LocationAccount>,
+    #[account(
+        seeds = [BOSS_LOCATION_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref()],
+        bump = boss_location.bump,
+        constraint = boss_location.location == location_account.key() @ PackrunError::InvalidEnemyLocation,
+        constraint = boss_location.day_id == daily_dungeon.day_id @ PackrunError::InvalidEnemyLocation,
+        constraint = boss_location.poi_id == location_account.poi_id @ PackrunError::InvalidEnemyLocation
+    )]
+    pub boss_location: Account<'info, BossLocation>,
+    /// The shard_index is derived from the instruction data, not from the account seed.
+    /// We verify it matches: shard_index == hash(player_pubkey) % boss_shard_count.
+    #[account(
+        mut,
+        seeds = [BOSS_SHARD_SEED, daily_dungeon.day_id.as_bytes(), &shard_index.to_le_bytes()],
+        bump = boss_damage_shard.bump,
+        constraint = boss_damage_shard.day_id == daily_dungeon.day_id @ PackrunError::InvalidBossDamageShard,
+        constraint = boss_damage_shard.boss_location == boss_location.key() @ PackrunError::InvalidBossDamageShard,
+        constraint = boss_damage_shard.shard_index == shard_index @ PackrunError::InvalidBossDamageShard
+    )]
+    pub boss_damage_shard: Account<'info, BossDamageShard>,
+    #[account(
+        init_if_needed,
+        payer = player,
+        space = PLAYER_BOSS_CONTRIBUTION_SPACE,
+        seeds = [BOSS_CONTRIBUTION_SEED, daily_dungeon.day_id.as_bytes(), player.key().as_ref()],
+        bump
+    )]
+    pub player_boss_contribution: Account<'info, PlayerBossContribution>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimBossParticipationNft<'info> {
+    #[account(mut)]
+    pub player: Signer<'info>,
+    #[account(
+        seeds = [DAILY_DUNGEON_SEED, daily_dungeon.day_id.as_bytes()],
+        bump = daily_dungeon.bump
+    )]
+    pub daily_dungeon: Account<'info, DailyDungeon>,
+    #[account(
+        seeds = [BOSS_LOCATION_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref()],
+        bump = boss_location.bump,
+        constraint = boss_location.day_id == daily_dungeon.day_id @ PackrunError::InvalidBossLocation,
+        constraint = boss_location.location == location_account.key() @ PackrunError::InvalidBossLocation
+    )]
+    pub boss_location: Account<'info, BossLocation>,
+    #[account(
+        seeds = [LOCATION_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref()],
+        bump = location_account.bump,
+        constraint = location_account.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.kind == LocationKind::Boss @ PackrunError::LocationIsNotBoss
+    )]
+    pub location_account: Account<'info, LocationAccount>,
+    #[account(
+        mut,
+        seeds = [BOSS_CONTRIBUTION_SEED, daily_dungeon.day_id.as_bytes(), player.key().as_ref()],
+        bump = player_boss_contribution.bump,
+        constraint = player_boss_contribution.player == player.key() @ PackrunError::InvalidBossContribution,
+        constraint = player_boss_contribution.day_id == daily_dungeon.day_id @ PackrunError::InvalidBossContribution,
+        constraint = player_boss_contribution.boss_location == boss_location.key() @ PackrunError::InvalidBossContribution
+    )]
+    pub player_boss_contribution: Account<'info, PlayerBossContribution>,
+    #[account(
+        seeds = [BOSS_SHARD_SEED, daily_dungeon.day_id.as_bytes(), &player_boss_contribution.shard_index.to_le_bytes()],
+        bump = boss_damage_shard.bump,
+        constraint = boss_damage_shard.day_id == daily_dungeon.day_id @ PackrunError::InvalidBossDamageShard,
+        constraint = boss_damage_shard.boss_location == boss_location.key() @ PackrunError::InvalidBossDamageShard
+    )]
+    pub boss_damage_shard: Account<'info, BossDamageShard>,
+    #[account(
+        init,
+        payer = player,
+        space = BOSS_NFT_CLAIM_SPACE,
+        seeds = [BOSS_NFT_CLAIM_SEED, daily_dungeon.day_id.as_bytes(), player.key().as_ref()],
+        bump
+    )]
+    pub boss_nft_claim: Account<'info, BossNftClaim>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimDailyReward<'info> {
+    #[account(mut)]
+    pub player: Signer<'info>,
+    #[account(
+        seeds = [DAILY_DUNGEON_SEED, daily_dungeon.day_id.as_bytes()],
+        bump = daily_dungeon.bump
+    )]
+    pub daily_dungeon: Account<'info, DailyDungeon>,
+    #[account(
+        seeds = [PLAYER_RUN_SEED, daily_dungeon.day_id.as_bytes(), player.key().as_ref()],
+        bump = player_run.bump,
+        constraint = player_run.player == player.key() @ PackrunError::InvalidPlayerRun,
+        constraint = player_run.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidPlayerRun
+    )]
+    pub player_run: Account<'info, PlayerRun>,
+    #[account(
+        init,
+        payer = player,
+        space = DAILY_REWARD_CLAIM_SPACE,
+        seeds = [DAILY_REWARD_CLAIM_SEED, daily_dungeon.day_id.as_bytes(), player.key().as_ref()],
+        bump
+    )]
+    pub daily_reward_claim: Account<'info, DailyRewardClaim>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
@@ -411,6 +905,7 @@ pub struct LocationMerkleProofStep {
 pub struct LocationSpecInput {
     pub day_id: String,
     pub poi_id: String,
+    pub poi_id_hash: [u8; 32],
     pub kind: LocationKind,
     pub x: u32,
     pub y: u32,
@@ -454,7 +949,11 @@ pub struct ShopItemSlotSpecInput {
     pub slot_id: String,
     pub item_id: String,
     pub price: u64,
-    pub stock: u16,
+    pub base_stock: u16,
+    pub max_stock: u16,
+    pub restock_interval_seconds: i64,
+    pub max_restock_count: u16,
+    pub per_wallet_daily_limit: u16,
     pub reward_tier: RewardTier,
 }
 
@@ -481,6 +980,56 @@ pub struct EnemyCleared {
     pub poi_id: String,
     pub proof_uri_hash: Option<[u8; 32]>,
     pub rare_eligibility_points_awarded: u32,
+}
+
+#[event]
+pub struct ItemPurchased {
+    pub day_id: String,
+    pub player: Pubkey,
+    pub location: Pubkey,
+    pub shop: Pubkey,
+    pub shop_item_slot: Pubkey,
+    pub slot_index: u16,
+    pub poi_id: String,
+    pub item_id: String,
+    pub price: u64,
+    pub sold_count: u64,
+    pub player_item_count: u32,
+}
+
+#[event]
+pub struct BossDamageSubmitted {
+    pub day_id: String,
+    pub player: Pubkey,
+    pub boss_location: Pubkey,
+    pub shard_index: u16,
+    pub damage_score: u64,
+    pub boss_battle_hash: [u8; 32],
+    pub proof_uri_hash: Option<[u8; 32]>,
+    pub total_damage: u64,
+    pub participant_count: u32,
+    pub player_total_damage: u64,
+}
+
+#[event]
+pub struct BossNftClaimed {
+    pub day_id: String,
+    pub boss_id: String,
+    pub player: Pubkey,
+    pub player_damage: u64,
+    pub shard_index: u16,
+    pub total_damage_snapshot: u64,
+    pub boss_location: Pubkey,
+}
+
+#[event]
+pub struct DailyRewardClaimed {
+    pub day_id: String,
+    pub player: Pubkey,
+    pub reward_tier: RewardTier,
+    pub cleared_locations: u32,
+    pub boss_damage: u64,
+    pub claimed_at: i64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -518,7 +1067,7 @@ pub struct DailyDungeon {
     pub bump: u8,
 }
 
-/// PDA: ["location", day_id, poi_id]
+/// PDA: ["location", day_id, poi_id_hash]
 #[account]
 #[derive(InitSpace)]
 pub struct LocationAccount {
@@ -527,6 +1076,7 @@ pub struct LocationAccount {
     pub day_id: String,
     #[max_len(64)]
     pub poi_id: String,
+    pub poi_id_hash: [u8; 32],
     pub kind: LocationKind,
     pub status: LocationStatus,
     pub x: u32,
@@ -556,8 +1106,10 @@ pub struct EnemyLocation {
     pub clear_count: u64,
     pub base_cooldown_seconds: i64,
     pub next_available_at: i64,
+    pub bump: u8,
 }
 
+/// PDA: ["shop", day_id, poi_id_hash]
 #[account]
 #[derive(InitSpace)]
 pub struct ShopAccount {
@@ -570,9 +1122,30 @@ pub struct ShopAccount {
     pub keeper_name: String,
     pub slot_count: u16,
     pub opened_at: i64,
+    pub bump: u8,
 }
 
-/// PDA: ["shop_slot", day_id, poi_id, slot_index]
+/// PDA: ["boss", day_id, poi_id_hash]
+#[account]
+#[derive(InitSpace)]
+pub struct BossLocation {
+    pub location: Pubkey,
+    #[max_len(16)]
+    pub day_id: String,
+    #[max_len(64)]
+    pub poi_id: String,
+    #[max_len(64)]
+    pub boss_id: String,
+    #[max_len(64)]
+    pub name: String,
+    pub level: u16,
+    pub base_hp: u32,
+    pub base_damage: u32,
+    pub reward_tier: RewardTier,
+    pub bump: u8,
+}
+
+/// PDA: ["shop_slot", day_id, poi_id_hash, slot_index]
 #[account]
 #[derive(InitSpace)]
 pub struct ShopItemSlotAccount {
@@ -581,6 +1154,7 @@ pub struct ShopItemSlotAccount {
     pub day_id: String,
     #[max_len(64)]
     pub poi_id: String,
+    pub poi_id_hash: [u8; 32],
     pub slot_index: u16,
     #[max_len(64)]
     pub item_id: String,
@@ -609,6 +1183,7 @@ pub struct PlayerRun {
     pub boss_damage: u64,
     pub common_loot_count: u32,
     pub rare_eligibility_points: u32,
+    pub items_purchased: u32,
     pub entered_at: i64,
     pub active: bool,
     pub bump: u8,
@@ -623,7 +1198,7 @@ pub struct BossDamageShard {
     pub boss_location: Pubkey,
     pub shard_index: u16,
     pub total_damage: u64,
-    pub contribution_count: u32,
+    pub participant_count: u32,
     pub bump: u8,
 }
 
@@ -668,6 +1243,21 @@ pub struct DailyRewardClaim {
     pub bump: u8,
 }
 
+/// PDA: ["boss_nft_claim", day_id, player]
+/// Tracks whether a player has claimed their Boss participation NFT for a given day.
+#[account]
+#[derive(InitSpace)]
+pub struct BossNftClaim {
+    #[max_len(16)]
+    pub day_id: String,
+    pub player: Pubkey,
+    pub boss_location: Pubkey,
+    pub player_damage: u64,
+    pub shard_index: u16,
+    pub claimed_at: i64,
+    pub bump: u8,
+}
+
 fn validate_init_daily_dungeon_input(
     day_id: &str,
     width: u32,
@@ -697,6 +1287,73 @@ fn validate_enter_dungeon(dungeon: &DailyDungeon, day_id: &str, now: i64) -> Res
     require!(
         now >= dungeon.start_ts && now <= dungeon.end_ts,
         PackrunError::DungeonNotInOpenWindow
+    );
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_init_shop_item_slot(
+    dungeon: &DailyDungeon,
+    location: &LocationAccount,
+    shop: &ShopAccount,
+    location_key: Pubkey,
+    day_id: &str,
+    poi_id: &str,
+    poi_id_hash_value: [u8; 32],
+    slot_index: u16,
+    slot: &ShopItemSlotSpecInput,
+    now: i64,
+) -> Result<()> {
+    require!(day_id.len() <= DAY_ID_MAX_LEN, PackrunError::DayIdTooLong);
+    require!(poi_id.len() <= POI_ID_MAX_LEN, PackrunError::PoiIdTooLong);
+    require!(
+        poi_id_hash_value == poi_id_hash(poi_id),
+        PackrunError::PoiIdHashMismatch
+    );
+    require!(dungeon.day_id == day_id, PackrunError::DungeonDayMismatch);
+    require!(
+        dungeon.status == DungeonStatus::Open,
+        PackrunError::DungeonNotOpen
+    );
+    require!(
+        now >= dungeon.start_ts && now <= dungeon.end_ts,
+        PackrunError::DungeonNotInOpenWindow
+    );
+    require!(
+        location.day_id == day_id
+            && location.poi_id == poi_id
+            && location.poi_id_hash == poi_id_hash_value,
+        PackrunError::InvalidLocationAccount
+    );
+    require!(
+        location.kind == LocationKind::Shop,
+        PackrunError::LocationIsNotShop
+    );
+    require!(
+        shop.location == location_key && shop.day_id == day_id && shop.poi_id == poi_id,
+        PackrunError::InvalidShopAccount
+    );
+    require!(
+        slot_index < shop.slot_count,
+        PackrunError::InvalidShopItemSlot
+    );
+    require!(
+        slot.slot_id.len() <= POI_ID_MAX_LEN && slot.item_id.len() <= ITEM_ID_MAX_LEN,
+        PackrunError::InvalidShopItemSlot
+    );
+    require!(slot.base_stock > 0, PackrunError::InvalidShopItemSlot);
+    require!(
+        slot.max_stock >= slot.base_stock,
+        PackrunError::InvalidShopItemSlot
+    );
+    require!(
+        slot.restock_interval_seconds > 0,
+        PackrunError::InvalidShopItemSlot
+    );
+    require!(
+        slot.per_wallet_daily_limit > 0 && slot.per_wallet_daily_limit <= slot.max_stock,
+        PackrunError::InvalidShopItemSlot
     );
 
     Ok(())
@@ -738,10 +1395,469 @@ fn validate_clear_enemy(
     Ok(())
 }
 
+fn validate_buy_item(
+    dungeon: &DailyDungeon,
+    location: &LocationAccount,
+    shop_key: Pubkey,
+    slot: &ShopItemSlotAccount,
+    player_run: &PlayerRun,
+    slot_index: u16,
+    expected_price: u64,
+    now: i64,
+) -> Result<()> {
+    require!(
+        dungeon.status == DungeonStatus::Open,
+        PackrunError::DungeonNotOpen
+    );
+    require!(
+        now >= dungeon.start_ts && now <= dungeon.end_ts,
+        PackrunError::DungeonNotInOpenWindow
+    );
+    require!(player_run.active, PackrunError::PlayerRunNotActive);
+    require!(
+        location.kind == LocationKind::Shop,
+        PackrunError::LocationIsNotShop
+    );
+    require!(
+        slot.shop == shop_key
+            && slot.day_id == dungeon.day_id
+            && slot.poi_id == location.poi_id
+            && slot.poi_id_hash == location.poi_id_hash
+            && slot.slot_index == slot_index,
+        PackrunError::InvalidShopItemSlot
+    );
+
+    // Compute current restock epoch and available stock
+    let restock_epoch = compute_restock_epoch(slot.opened_at, now, slot.restock_interval_seconds)?;
+    let available_stock = compute_available_stock(
+        slot.base_stock,
+        restock_epoch,
+        slot.sold_count,
+        slot.max_stock,
+    )?;
+
+    require!(available_stock > 0, PackrunError::InsufficientStock);
+
+    // Compute expected price and verify match
+    let computed_price = compute_shop_price(
+        slot.base_price,
+        restock_epoch,
+        slot.sold_count,
+    )?;
+    require!(
+        expected_price == computed_price,
+        PackrunError::PriceMismatch
+    );
+
+    // Check per-wallet daily purchase limit
+    if slot.per_wallet_daily_limit > 0 {
+        require!(
+            player_run.items_purchased < slot.per_wallet_daily_limit as u32,
+            PackrunError::PurchaseLimitExceeded
+        );
+    }
+
+    Ok(())
+}
+
+fn apply_buy_item_state(
+    slot: &mut ShopItemSlotAccount,
+    player_run: &mut PlayerRun,
+    _now: i64,
+) -> Result<()> {
+    // Decrease stock (increase sold_count)
+    slot.sold_count = slot
+        .sold_count
+        .checked_add(1)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+
+    // Update player inventory counters
+    player_run.items_purchased = player_run
+        .items_purchased
+        .checked_add(DEFAULT_ITEMS_PURCHASED_PER_BUY)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SubmitBossDamageOutcome {
+    pub shard_total_damage: u64,
+    pub participant_count: u32,
+    pub player_total_damage: u64,
+    pub is_first_participation: bool,
+}
+
+fn validate_submit_boss_damage(
+    dungeon: &DailyDungeon,
+    location: &LocationAccount,
+    player_run: &PlayerRun,
+    boss_damage_shard: &BossDamageShard,
+    _player_boss_contribution: &PlayerBossContribution,
+    player_pubkey: Pubkey,
+    boss_location_key: Pubkey,
+    boss_shard_count: u16,
+    damage_score: u64,
+    now: i64,
+) -> Result<()> {
+    require!(
+        dungeon.status == DungeonStatus::Open,
+        PackrunError::DungeonNotOpen
+    );
+    require!(
+        now >= dungeon.start_ts && now <= dungeon.end_ts,
+        PackrunError::DungeonNotInOpenWindow
+    );
+    require!(player_run.active, PackrunError::PlayerRunNotActive);
+    require!(
+        location.kind == LocationKind::Boss,
+        PackrunError::LocationIsNotBoss
+    );
+    require!(damage_score > 0, PackrunError::InvalidDamageScore);
+    require!(
+        damage_score <= MAX_BOSS_DAMAGE_PER_SUBMISSION,
+        PackrunError::DamageScoreExceeded
+    );
+
+    // Verify shard_index matches hash(player_pubkey) % boss_shard_count
+    let expected_shard_index = compute_boss_shard_index(player_pubkey, boss_shard_count);
+    require!(
+        boss_damage_shard.shard_index == expected_shard_index,
+        PackrunError::ShardIndexMismatch
+    );
+
+    // Verify the shard belongs to this dungeon's boss
+    require!(
+        boss_damage_shard.day_id == dungeon.day_id
+            && boss_damage_shard.boss_location == boss_location_key,
+        PackrunError::InvalidBossDamageShard
+    );
+
+    // Check player has not exceeded boss submission limit.
+    // Uses player_run.boss_damage as a proxy for number of submissions made.
+    let estimated_submissions = player_run
+        .boss_damage
+        .checked_div(MAX_BOSS_DAMAGE_PER_SUBMISSION)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    require!(
+        (estimated_submissions as u16) < MAX_BOSS_SUBMISSIONS_PER_PLAYER,
+        PackrunError::BossSubmissionLimitExceeded
+    );
+
+    Ok(())
+}
+
+fn apply_submit_boss_damage(
+    shard: &mut BossDamageShard,
+    contribution: &mut PlayerBossContribution,
+    player_run: &mut PlayerRun,
+    damage_score: u64,
+    now: i64,
+) -> Result<SubmitBossDamageOutcome> {
+    let is_first_participation = contribution.total_damage == 0;
+
+    // Update shard
+    shard.total_damage = shard
+        .total_damage
+        .checked_add(damage_score)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+
+    if is_first_participation {
+        shard.participant_count = shard
+            .participant_count
+            .checked_add(1)
+            .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    }
+
+    // Initialize contribution account fields on first participation
+    if is_first_participation {
+        contribution.day_id = player_run.day_id.clone();
+        contribution.player = player_run.player;
+        contribution.boss_location = shard.boss_location;
+        contribution.shard_index = shard.shard_index;
+    }
+
+    contribution.total_damage = contribution
+        .total_damage
+        .checked_add(damage_score)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    contribution.last_hit_at = now;
+
+    // Update player run
+    player_run.boss_damage = player_run
+        .boss_damage
+        .checked_add(damage_score)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+
+    Ok(SubmitBossDamageOutcome {
+        shard_total_damage: shard.total_damage,
+        participant_count: shard.participant_count,
+        player_total_damage: contribution.total_damage,
+        is_first_participation,
+    })
+}
+
+fn validate_claim_boss_participation_nft(
+    dungeon: &DailyDungeon,
+    boss_location: &BossLocation,
+    contribution: &PlayerBossContribution,
+    nft_claim: &BossNftClaim,
+    player_pubkey: Pubkey,
+) -> Result<()> {
+    // Boss must be defeated (dungeon status allows claim after boss is beaten)
+    require!(
+        dungeon.status == DungeonStatus::Open || dungeon.status == DungeonStatus::Completed,
+        PackrunError::DungeonNotOpen
+    );
+
+    // Player must have contributed at least MINIMUM_BOSS_DAMAGE
+    require!(
+        contribution.total_damage >= MINIMUM_BOSS_DAMAGE,
+        PackrunError::InsufficientBossDamage
+    );
+
+    // Player must not have already claimed for this day
+    require!(
+        !nft_claim.claimed(),
+        PackrunError::BossNftAlreadyClaimed
+    );
+
+    // Contribution must belong to this player
+    require!(
+        contribution.player == player_pubkey,
+        PackrunError::InvalidBossContribution
+    );
+
+    // Contribution must match this boss
+    require!(
+        contribution.boss_location == boss_location.location,
+        PackrunError::InvalidBossContribution
+    );
+
+    Ok(())
+}
+
+fn apply_claim_boss_participation_nft(
+    nft_claim: &mut BossNftClaim,
+    dungeon: &DailyDungeon,
+    boss_location: &BossLocation,
+    contribution: &PlayerBossContribution,
+    player_pubkey: Pubkey,
+    now: i64,
+) -> Result<()> {
+    nft_claim.day_id = dungeon.day_id.clone();
+    nft_claim.player = player_pubkey;
+    nft_claim.boss_location = boss_location.location;
+    nft_claim.player_damage = contribution.total_damage;
+    nft_claim.shard_index = contribution.shard_index;
+    nft_claim.claimed_at = now;
+
+    Ok(())
+}
+
+impl BossNftClaim {
+    /// Returns true if this claim account has been initialized (claimed).
+    pub fn claimed(&self) -> bool {
+        self.claimed_at != 0
+    }
+}
+
+fn validate_claim_daily_reward(
+    dungeon: &DailyDungeon,
+    player_run: &PlayerRun,
+    daily_reward_claim: &DailyRewardClaim,
+    player_pubkey: Pubkey,
+    dungeon_key: Pubkey,
+    now: i64,
+) -> Result<()> {
+    // Current time must be after dungeon end_ts
+    require!(
+        now > dungeon.end_ts,
+        PackrunError::DungeonNotEnded
+    );
+
+    // Player must have an active run
+    require!(player_run.active, PackrunError::PlayerRunNotActive);
+
+    // Player must not have already claimed
+    require!(
+        !daily_reward_claim.claimed(),
+        PackrunError::DailyRewardAlreadyClaimed
+    );
+
+    // Player run must belong to this player
+    require!(
+        player_run.player == player_pubkey,
+        PackrunError::InvalidPlayerRun
+    );
+
+    // Player run must belong to this dungeon
+    require!(
+        player_run.daily_dungeon == dungeon_key,
+        PackrunError::InvalidPlayerRun
+    );
+
+    Ok(())
+}
+
+/// Compute the reward tier a player qualifies for based on their run performance.
+///
+/// Tiers are evaluated from highest (Legendary) to lowest (Uncommon).
+/// If no tier is met, returns an error.
+fn compute_daily_reward_tier(
+    dungeon: &DailyDungeon,
+    player_run: &PlayerRun,
+) -> Result<RewardTier> {
+    let cleared = player_run.cleared_locations;
+    let boss_damage = player_run.boss_damage;
+
+    // Legendary: deterministic low-probability hash threshold.
+    // Hash(day_id || player || boss_damage || cleared_locations) must have
+    // the first 2 bytes (as u16) < LEGENDARY_THRESHOLD (out of u16::MAX).
+    // This gives roughly a 1-in-256 chance (~0.39%) when threshold = 256.
+    const LEGENDARY_THRESHOLD: u16 = 256;
+    if cleared >= 12 && boss_damage >= 1500 {
+        let hash_input = {
+            let mut buf = Vec::with_capacity(
+                dungeon.day_id.len() + 32 + 8 + 4,
+            );
+            buf.extend_from_slice(dungeon.day_id.as_bytes());
+            buf.extend_from_slice(player_run.player.as_ref());
+            buf.extend_from_slice(&boss_damage.to_le_bytes());
+            buf.extend_from_slice(&cleared.to_le_bytes());
+            buf
+        };
+        let hash_result = solana_sha256_hasher::hash(&hash_input);
+        let threshold = u16::from_le_bytes([
+            hash_result.to_bytes()[0],
+            hash_result.to_bytes()[1],
+        ]);
+        if threshold < LEGENDARY_THRESHOLD {
+            return Ok(RewardTier::Legendary);
+        }
+    }
+
+    // Epic: cleared_locations >= 12 and boss_damage >= 1500
+    if cleared >= 12 && boss_damage >= 1500 {
+        return Ok(RewardTier::Epic);
+    }
+
+    // Rare: cleared_locations >= 8 and boss_damage >= 500
+    if cleared >= 8 && boss_damage >= 500 {
+        return Ok(RewardTier::Rare);
+    }
+
+    // Uncommon: cleared_locations >= 3
+    if cleared >= 3 {
+        return Ok(RewardTier::Uncommon);
+    }
+
+    // No tier met
+    Err(error!(PackrunError::DailyRewardTierNotMet))
+}
+
+fn apply_claim_daily_reward(
+    daily_reward_claim: &mut DailyRewardClaim,
+    dungeon: &DailyDungeon,
+    reward_tier: RewardTier,
+    player_pubkey: Pubkey,
+    now: i64,
+) -> Result<()> {
+    daily_reward_claim.day_id = dungeon.day_id.clone();
+    daily_reward_claim.player = player_pubkey;
+    daily_reward_claim.reward_pool = Pubkey::default(); // No reward pool in MVP
+    daily_reward_claim.reward_tier = reward_tier;
+    daily_reward_claim.amount = 0; // No amount in MVP
+    daily_reward_claim.claimed_at = now;
+
+    Ok(())
+}
+
+impl DailyRewardClaim {
+    /// Returns true if this claim account has been initialized (claimed).
+    pub fn claimed(&self) -> bool {
+        self.claimed_at != 0
+    }
+}
+
+fn compute_boss_shard_index(player_pubkey: Pubkey, shard_count: u16) -> u16 {
+    let hash = solana_sha256_hasher::hash(player_pubkey.as_ref());
+    let hash_prefix = u16::from_le_bytes([hash.to_bytes()[0], hash.to_bytes()[1]]);
+    hash_prefix % shard_count
+}
+
+fn compute_restock_epoch(opened_at: i64, current_time: i64, interval: i64) -> Result<u64> {
+    if interval <= 0 {
+        return Ok(0);
+    }
+    if current_time < opened_at {
+        return Ok(0);
+    }
+    let elapsed = current_time
+        .checked_sub(opened_at)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    if elapsed < 0 {
+        return Ok(0);
+    }
+    let epoch = (elapsed as u64).checked_div(interval as u64)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    Ok(epoch)
+}
+
+fn compute_available_stock(
+    base_stock: u16,
+    restock_epoch: u64,
+    sold_count: u64,
+    max_stock: u16,
+) -> Result<u64> {
+    if base_stock == 0 || max_stock == 0 {
+        return Ok(0);
+    }
+    let restock_size = base_stock as u64;
+    let lifetime_supply = restock_size
+        .checked_mul(restock_epoch.checked_add(1).ok_or(error!(PackrunError::ArithmeticOverflow))?)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    let unsold_supply = if sold_count >= lifetime_supply {
+        0u64
+    } else {
+        lifetime_supply
+            .checked_sub(sold_count)
+            .ok_or(error!(PackrunError::ArithmeticOverflow))?
+    };
+    Ok(unsold_supply.min(max_stock as u64))
+}
+
+fn compute_shop_price(
+    base_price: u64,
+    restock_epoch: u64,
+    sold_count: u64,
+) -> Result<u64> {
+    let restock_increase = (restock_epoch as u64)
+        .checked_mul(DEFAULT_RESTOCK_PRICE_INCREASE_BPS)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    let sold_increase = sold_count
+        .checked_mul(DEFAULT_SOLD_PRICE_INCREASE_BPS)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    let multiplier_bps = BPS_DENOMINATOR
+        .checked_add(restock_increase)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?
+        .checked_add(sold_increase)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    let price_numer = base_price
+        .checked_mul(multiplier_bps)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    // Ceiling division: (numerator + denominator - 1) / denominator
+    let price = price_numer
+        .checked_add(BPS_DENOMINATOR.checked_sub(1).ok_or(error!(PackrunError::ArithmeticOverflow))?)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?
+        .checked_div(BPS_DENOMINATOR)
+        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    Ok(price)
+}
+
 fn apply_clear_enemy_state(
     enemy: &mut EnemyLocation,
     player_run: &mut PlayerRun,
-    player_performance_summary: &PlayerPerformanceSummary,
     now: i64,
 ) -> Result<ClearEnemyOutcome> {
     player_run.energy = player_run
@@ -769,11 +1885,8 @@ fn apply_clear_enemy_state(
         .checked_add(1)
         .ok_or(error!(PackrunError::ArithmeticOverflow))?;
 
-    let rare_eligibility_points_awarded = compute_rare_eligibility_points(
-        player_performance_summary,
-        enemy.clear_count,
-        enemy.valuable_clear_cap,
-    );
+    let rare_eligibility_points_awarded =
+        compute_rare_eligibility_points(enemy.clear_count, enemy.valuable_clear_cap);
     player_run.rare_eligibility_points = player_run
         .rare_eligibility_points
         .checked_add(rare_eligibility_points_awarded)
@@ -808,27 +1921,12 @@ fn compute_enemy_cooldown_seconds(base_cooldown_seconds: i64, clear_count: u64) 
         .ok_or(error!(PackrunError::ArithmeticOverflow))
 }
 
-fn compute_rare_eligibility_points(
-    player_performance_summary: &PlayerPerformanceSummary,
-    clear_count: u64,
-    valuable_clear_cap: u16,
-) -> u32 {
+fn compute_rare_eligibility_points(clear_count: u64, valuable_clear_cap: u16) -> u32 {
     if valuable_clear_cap == 0 || clear_count >= valuable_clear_cap as u64 {
         return 0;
     }
 
-    let mut points = 1 + (player_performance_summary.score / 1_000).min(3);
-    if player_performance_summary.flawless {
-        points += 1;
-    }
-    if player_performance_summary.damage_taken == 0 {
-        points += 1;
-    }
-    if player_performance_summary.turns_taken <= 5 {
-        points += 1;
-    }
-
-    points.min(7)
+    DEFAULT_RARE_ELIGIBILITY_POINTS_PER_CLEAR
 }
 
 fn validate_location_spec_input(spec: &LocationSpecInput) -> Result<()> {
@@ -839,6 +1937,10 @@ fn validate_location_spec_input(spec: &LocationSpecInput) -> Result<()> {
     require!(
         spec.poi_id.len() <= POI_ID_MAX_LEN,
         PackrunError::PoiIdTooLong
+    );
+    require!(
+        spec.poi_id_hash == poi_id_hash(&spec.poi_id),
+        PackrunError::PoiIdHashMismatch
     );
 
     if let Some(enemy) = &spec.enemy {
@@ -1025,7 +2127,7 @@ fn append_shop_json(json: &mut String, shop: &ShopSpecInput) {
         json.push_str("\",\"slotId\":");
         append_json_string(json, &slot.slot_id);
         json.push_str(",\"stock\":");
-        json.push_str(&slot.stock.to_string());
+        json.push_str(&slot.base_stock.to_string());
         json.push('}');
     }
     json.push(']');
@@ -1062,6 +2164,10 @@ fn append_json_string(json: &mut String, value: &str) {
 
 fn sha256_json(json: &str) -> [u8; 32] {
     hash(json.as_bytes()).to_bytes()
+}
+
+fn poi_id_hash(poi_id: &str) -> [u8; 32] {
+    hash(poi_id.as_bytes()).to_bytes()
 }
 
 fn bytes_to_hex(bytes: &[u8; 32]) -> String {
@@ -1121,6 +2227,8 @@ pub enum PackrunError {
     DungeonNotInOpenWindow,
     #[msg("poi_id exceeds the maximum supported length.")]
     PoiIdTooLong,
+    #[msg("poi_id_hash does not match poi_id.")]
+    PoiIdHashMismatch,
     #[msg("location detail field exceeds the maximum supported length.")]
     LocationDetailTooLong,
     #[msg("location Merkle proof is invalid.")]
@@ -1137,6 +2245,12 @@ pub enum PackrunError {
     InvalidLocationAccount,
     #[msg("enemy location account is invalid.")]
     InvalidEnemyLocation,
+    #[msg("location is not a shop.")]
+    LocationIsNotShop,
+    #[msg("shop account is invalid.")]
+    InvalidShopAccount,
+    #[msg("shop item slot configuration is invalid.")]
+    InvalidShopItemSlot,
     #[msg("player run is not active.")]
     PlayerRunNotActive,
     #[msg("location is not an enemy.")]
@@ -1149,6 +2263,40 @@ pub enum PackrunError {
     DailyClearLimitExceeded,
     #[msg("arithmetic overflow.")]
     ArithmeticOverflow,
+    #[msg("shop item slot has insufficient stock.")]
+    InsufficientStock,
+    #[msg("expected price does not match the computed price.")]
+    PriceMismatch,
+    #[msg("player has exceeded the per-wallet daily purchase limit for this item.")]
+    PurchaseLimitExceeded,
+    #[msg("damage_score must be greater than zero.")]
+    InvalidDamageScore,
+    #[msg("damage_score exceeds the maximum allowed per submission.")]
+    DamageScoreExceeded,
+    #[msg("shard_index does not match the player's assigned shard.")]
+    ShardIndexMismatch,
+    #[msg("player has exceeded the boss submission limit for this daily dungeon.")]
+    BossSubmissionLimitExceeded,
+    #[msg("location is not a boss location.")]
+    LocationIsNotBoss,
+    #[msg("boss damage shard account is invalid.")]
+    InvalidBossDamageShard,
+    #[msg("player boss contribution account is invalid.")]
+    InvalidBossContribution,
+    #[msg("boss location account is invalid.")]
+    InvalidBossLocation,
+    #[msg("player has not dealt enough damage to claim the boss NFT.")]
+    InsufficientBossDamage,
+    #[msg("player has already claimed the boss NFT for this daily dungeon.")]
+    BossNftAlreadyClaimed,
+    #[msg("daily dungeon has not ended yet.")]
+    DungeonNotEnded,
+    #[msg("player has already claimed the daily reward for this dungeon.")]
+    DailyRewardAlreadyClaimed,
+    #[msg("player run does not satisfy any reward tier condition.")]
+    DailyRewardTierNotMet,
+    #[msg("player run not found for this day and player.")]
+    PlayerRunNotFound,
 }
 
 #[cfg(test)]
@@ -1277,6 +2425,94 @@ mod tests {
     }
 
     #[test]
+    fn rejects_location_spec_with_mismatched_poi_id_hash() {
+        let mut spec = test_enemy_location_spec();
+        spec.poi_id_hash = [0; 32];
+
+        assert!(validate_location_spec_input(&spec).is_err());
+    }
+
+    #[test]
+    fn long_poi_id_location_pda_uses_hash_seed_within_seed_limits() {
+        let mut spec = test_enemy_location_spec();
+        spec.poi_id = "enemy-location-id-longer-than-32-bytes".to_string();
+        spec.poi_id_hash = poi_id_hash(&spec.poi_id);
+        let seeds: [&[u8]; 3] = [
+            LOCATION_SEED,
+            spec.day_id.as_bytes(),
+            spec.poi_id_hash.as_ref(),
+        ];
+
+        assert!(spec.poi_id.as_bytes().len() > 32);
+        assert!(validate_location_spec_input(&spec).is_ok());
+        assert!(seeds.iter().all(|seed| seed.len() <= 32));
+        let _ = Pubkey::find_program_address(&seeds, &crate::ID);
+    }
+
+    #[test]
+    fn detail_account_pdas_use_hash_seed_within_seed_limits() {
+        let mut spec = test_enemy_location_spec();
+        spec.poi_id = "detail-location-id-longer-than-32-bytes".to_string();
+        spec.poi_id_hash = poi_id_hash(&spec.poi_id);
+
+        assert!(spec.poi_id.as_bytes().len() > 32);
+        for detail_seed in [ENEMY_LOCATION_SEED, SHOP_SEED, BOSS_LOCATION_SEED] {
+            let seeds: [&[u8]; 3] = [
+                detail_seed,
+                spec.day_id.as_bytes(),
+                spec.poi_id_hash.as_ref(),
+            ];
+            assert!(seeds.iter().all(|seed| seed.len() <= 32));
+            let _ = Pubkey::find_program_address(&seeds, &crate::ID);
+        }
+    }
+
+    #[test]
+    fn validates_init_shop_item_slot_input() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_shop_location_account();
+        let shop = test_shop_account(Pubkey::default());
+        let slot = test_shop_item_slot_spec();
+
+        assert!(validate_init_shop_item_slot(
+            &dungeon,
+            &location,
+            &shop,
+            Pubkey::default(),
+            "2026-04-25",
+            "shop-1",
+            poi_id_hash("shop-1"),
+            1,
+            &slot,
+            1_500,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn rejects_shop_item_slot_when_stock_config_is_invalid() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_shop_location_account();
+        let shop = test_shop_account(Pubkey::default());
+        let mut slot = test_shop_item_slot_spec();
+        slot.base_stock = 0;
+
+        assert!(validate_init_shop_item_slot(
+            &dungeon,
+            &location,
+            &shop,
+            Pubkey::default(),
+            "2026-04-25",
+            "shop-1",
+            poi_id_hash("shop-1"),
+            1,
+            &slot,
+            1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
     fn rejects_clear_enemy_during_cooldown() {
         let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
         let location = test_enemy_location_account();
@@ -1293,13 +2529,7 @@ mod tests {
         let mut player_run = test_player_run();
         let previous_difficulty = enemy.difficulty_level;
 
-        let outcome = apply_clear_enemy_state(
-            &mut enemy,
-            &mut player_run,
-            &test_player_performance(),
-            1_500,
-        )
-        .unwrap();
+        let outcome = apply_clear_enemy_state(&mut enemy, &mut player_run, 1_500).unwrap();
 
         assert_eq!(enemy.clear_count, 1);
         assert!(enemy.difficulty_level > previous_difficulty);
@@ -1311,27 +2541,751 @@ mod tests {
         );
         assert_eq!(player_run.cleared_locations, 1);
         assert_eq!(player_run.common_loot_count, 1);
-        assert!(player_run.rare_eligibility_points > 0);
+        assert_eq!(
+            player_run.rare_eligibility_points,
+            DEFAULT_RARE_ELIGIBILITY_POINTS_PER_CLEAR
+        );
     }
 
     #[test]
-    fn clear_enemy_after_cap_only_adds_common_marker() {
+    fn spoofed_high_score_does_not_exceed_low_risk_rare_cap() {
+        let mut enemy = test_enemy_location();
+        let mut player_run = test_player_run();
+        let spoofed_performance = PlayerPerformanceSummary {
+            damage_dealt: u32::MAX,
+            damage_taken: 0,
+            flawless: true,
+            score: u32::MAX,
+            turns_taken: 1,
+        };
+
+        let _ = spoofed_performance;
+        let outcome = apply_clear_enemy_state(&mut enemy, &mut player_run, 1_500).unwrap();
+
+        assert_eq!(
+            outcome.rare_eligibility_points_awarded,
+            DEFAULT_RARE_ELIGIBILITY_POINTS_PER_CLEAR
+        );
+        assert_eq!(
+            player_run.rare_eligibility_points,
+            DEFAULT_RARE_ELIGIBILITY_POINTS_PER_CLEAR
+        );
+    }
+
+    #[test]
+    fn clear_after_valuable_clear_cap_awards_zero_rare_eligibility() {
         let mut enemy = test_enemy_location();
         enemy.clear_count = DEFAULT_VALUABLE_CLEAR_CAP as u64 - 1;
         let mut player_run = test_player_run();
 
-        let outcome = apply_clear_enemy_state(
-            &mut enemy,
-            &mut player_run,
-            &test_player_performance(),
-            1_500,
-        )
-        .unwrap();
+        let outcome = apply_clear_enemy_state(&mut enemy, &mut player_run, 1_500).unwrap();
 
         assert_eq!(enemy.clear_count, DEFAULT_VALUABLE_CLEAR_CAP as u64);
         assert_eq!(player_run.common_loot_count, 1);
         assert_eq!(outcome.rare_eligibility_points_awarded, 0);
         assert_eq!(player_run.rare_eligibility_points, 0);
+    }
+
+    // ── buy_item tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn buy_item_succeeds_with_valid_inputs() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_shop_location_account();
+        let shop_key = Pubkey::default();
+        let slot = test_shop_item_slot_account();
+        let player_run = test_player_run();
+        // opened_at=1_000, now=1_500, interval=3_600 → restock_epoch=0
+        // base_stock=3, sold_count=0, max_stock=5 → available=3
+        // base_price=25, restock_epoch=0, sold_count=0 → price=25
+        let price = compute_shop_price(25, 0, 0).unwrap();
+        assert_eq!(price, 25);
+
+        assert!(validate_buy_item(
+            &dungeon, &location, shop_key, &slot, &player_run, 0, price, 1_500,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn buy_item_fails_when_dungeon_not_open() {
+        let dungeon = test_dungeon(DungeonStatus::Pending, 1_000, 2_000);
+        let location = test_shop_location_account();
+        let shop_key = Pubkey::default();
+        let slot = test_shop_item_slot_account();
+        let player_run = test_player_run();
+
+        assert!(validate_buy_item(
+            &dungeon, &location, shop_key, &slot, &player_run, 0, 25, 1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn buy_item_fails_when_location_is_not_shop() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_enemy_location_account();
+        let shop_key = Pubkey::default();
+        let slot = test_shop_item_slot_account();
+        let player_run = test_player_run();
+
+        assert!(validate_buy_item(
+            &dungeon, &location, shop_key, &slot, &player_run, 0, 25, 1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn buy_item_fails_when_player_run_not_active() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_shop_location_account();
+        let shop_key = Pubkey::default();
+        let slot = test_shop_item_slot_account();
+        let mut player_run = test_player_run();
+        player_run.active = false;
+
+        assert!(validate_buy_item(
+            &dungeon, &location, shop_key, &slot, &player_run, 0, 25, 1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn buy_item_fails_when_insufficient_stock() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_shop_location_account();
+        let shop_key = Pubkey::default();
+        // sold_count >= lifetime supply (base_stock=3, restock_epoch=0 → lifetime=3)
+        let slot = test_shop_item_slot_account_with_sold(3);
+        let player_run = test_player_run();
+
+        assert!(validate_buy_item(
+            &dungeon, &location, shop_key, &slot, &player_run, 0, 25, 1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn buy_item_fails_when_price_mismatch() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_shop_location_account();
+        let shop_key = Pubkey::default();
+        let slot = test_shop_item_slot_account();
+        let player_run = test_player_run();
+
+        // expected_price=99 but computed price=25
+        assert!(validate_buy_item(
+            &dungeon, &location, shop_key, &slot, &player_run, 0, 99, 1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn buy_item_fails_when_purchase_limit_exceeded() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_shop_location_account();
+        let shop_key = Pubkey::default();
+        let slot = test_shop_item_slot_account();
+        let mut player_run = test_player_run();
+        // per_wallet_daily_limit=2, so items_purchased=2 should fail
+        player_run.items_purchased = 2;
+
+        assert!(validate_buy_item(
+            &dungeon, &location, shop_key, &slot, &player_run, 0, 25, 1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn buy_item_applies_state_correctly() {
+        let mut slot = test_shop_item_slot_account();
+        let mut player_run = test_player_run();
+        let previous_sold = slot.sold_count;
+        let previous_items = player_run.items_purchased;
+
+        apply_buy_item_state(&mut slot, &mut player_run, 1_500).unwrap();
+
+        assert_eq!(slot.sold_count, previous_sold + 1);
+        assert_eq!(
+            player_run.items_purchased,
+            previous_items + DEFAULT_ITEMS_PURCHASED_PER_BUY
+        );
+    }
+
+    #[test]
+    fn compute_restock_epoch_returns_zero_before_opened() {
+        assert_eq!(compute_restock_epoch(1_000, 500, 3_600).unwrap(), 0);
+    }
+
+    #[test]
+    fn compute_restock_epoch_returns_zero_for_non_positive_interval() {
+        assert_eq!(compute_restock_epoch(1_000, 1_500, 0).unwrap(), 0);
+        assert_eq!(compute_restock_epoch(1_000, 1_500, -1).unwrap(), 0);
+    }
+
+    #[test]
+    fn compute_restock_epoch_counts_elapsed_intervals() {
+        // opened_at=1_000, now=1_500, interval=100 → elapsed=500 → epoch=5
+        assert_eq!(compute_restock_epoch(1_000, 1_500, 100).unwrap(), 5);
+    }
+
+    #[test]
+    fn compute_available_stock_returns_full_after_restock() {
+        // base_stock=3, restock_epoch=1 (2 batches), sold=0, max_stock=5
+        // lifetime=3*2=6, unsold=6, min(6,5)=5
+        assert_eq!(compute_available_stock(3, 1, 0, 5).unwrap(), 5);
+    }
+
+    #[test]
+    fn compute_available_stock_returns_zero_when_sold_out() {
+        // base_stock=3, restock_epoch=0 (1 batch), sold=3, max_stock=5
+        // lifetime=3, unsold=0
+        assert_eq!(compute_available_stock(3, 0, 3, 5).unwrap(), 0);
+    }
+
+    #[test]
+    fn compute_shop_price_increases_with_restocks_and_sales() {
+        // base_price=100, restock_epoch=1, sold_count=2
+        // multiplier = 10_000 + 1*1200 + 2*400 = 12_000
+        // price = ceil(100 * 12_000 / 10_000) = ceil(120) = 120
+        assert_eq!(compute_shop_price(100, 1, 2).unwrap(), 120);
+    }
+
+    #[test]
+    fn compute_shop_price_increases_after_restock() {
+        // base_price=25, restock_epoch=1, sold_count=0
+        // multiplier = 10_000 + 1*1200 + 0 = 11_200
+        // price = ceil(25 * 11_200 / 10_000) = ceil(28) = 28
+        assert_eq!(compute_shop_price(25, 1, 0).unwrap(), 28);
+    }
+
+    #[test]
+    fn restock_recovers_stock_and_increases_price() {
+        // Simulate: slot opens at t=0, interval=100, base_stock=3, max_stock=5
+        // At t=50: restock_epoch=0, available=3, price=25
+        // Player buys 3 → sold_count=3, available=0
+        // At t=150: restock_epoch=1 (one restock happened), available=min(3*2-3,5)=3
+        //   price = ceil(25 * (10_000 + 1*1200 + 3*400) / 10_000)
+        //   = ceil(25 * (10_000 + 1200 + 1200) / 10_000)
+        //   = ceil(25 * 12_400 / 10_000) = ceil(31) = 31
+        let _slot = test_shop_item_slot_account();
+        // After first restock epoch (t=150)
+        let restock_epoch = compute_restock_epoch(0, 150, 100).unwrap();
+        assert_eq!(restock_epoch, 1);
+
+        let available = compute_available_stock(3, restock_epoch, 3, 5).unwrap();
+        assert_eq!(available, 3);
+
+        let price = compute_shop_price(25, restock_epoch, 3).unwrap();
+        assert_eq!(price, 31);
+    }
+
+    // ── submit_boss_damage tests ────────────────────────────────────────────
+
+    #[test]
+    fn submit_boss_damage_succeeds_with_valid_inputs() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_boss_location_account();
+        let player_run = test_player_run();
+        let player_pubkey = Pubkey::default();
+        let expected_shard = compute_boss_shard_index(player_pubkey, 8);
+        let shard = test_boss_damage_shard(expected_shard);
+        let contribution = test_boss_contribution();
+
+        assert!(validate_submit_boss_damage(
+            &dungeon,
+            &location,
+            &player_run,
+            &shard,
+            &contribution,
+            player_pubkey,
+            Pubkey::default(),
+            8,
+            500,
+            1_500,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn submit_boss_damage_fails_when_dungeon_not_open() {
+        let dungeon = test_dungeon(DungeonStatus::Pending, 1_000, 2_000);
+        let location = test_boss_location_account();
+        let player_run = test_player_run();
+        let shard = test_boss_damage_shard(0);
+        let contribution = test_boss_contribution();
+
+        assert!(validate_submit_boss_damage(
+            &dungeon,
+            &location,
+            &player_run,
+            &shard,
+            &contribution,
+            Pubkey::default(),
+            Pubkey::default(),
+            8,
+            500,
+            1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn submit_boss_damage_fails_when_damage_score_zero() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_boss_location_account();
+        let player_run = test_player_run();
+        let shard = test_boss_damage_shard(0);
+        let contribution = test_boss_contribution();
+
+        assert!(validate_submit_boss_damage(
+            &dungeon,
+            &location,
+            &player_run,
+            &shard,
+            &contribution,
+            Pubkey::default(),
+            Pubkey::default(),
+            8,
+            0,
+            1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn submit_boss_damage_fails_when_damage_score_exceeds_max() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_boss_location_account();
+        let player_run = test_player_run();
+        let shard = test_boss_damage_shard(0);
+        let contribution = test_boss_contribution();
+
+        assert!(validate_submit_boss_damage(
+            &dungeon,
+            &location,
+            &player_run,
+            &shard,
+            &contribution,
+            Pubkey::default(),
+            Pubkey::default(),
+            8,
+            MAX_BOSS_DAMAGE_PER_SUBMISSION + 1,
+            1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn submit_boss_damage_fails_when_shard_index_mismatch() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_boss_location_account();
+        let player_run = test_player_run();
+        // shard_index=1 but player's hash % 8 = 0
+        let shard = test_boss_damage_shard(1);
+        let contribution = test_boss_contribution();
+
+        assert!(validate_submit_boss_damage(
+            &dungeon,
+            &location,
+            &player_run,
+            &shard,
+            &contribution,
+            Pubkey::default(),
+            Pubkey::default(),
+            8,
+            500,
+            1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn submit_boss_damage_fails_when_location_is_not_boss() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_enemy_location_account();
+        let player_run = test_player_run();
+        let shard = test_boss_damage_shard(0);
+        let contribution = test_boss_contribution();
+
+        assert!(validate_submit_boss_damage(
+            &dungeon,
+            &location,
+            &player_run,
+            &shard,
+            &contribution,
+            Pubkey::default(),
+            Pubkey::default(),
+            8,
+            500,
+            1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn submit_boss_damage_fails_when_player_run_not_active() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_boss_location_account();
+        let mut player_run = test_player_run();
+        player_run.active = false;
+        let shard = test_boss_damage_shard(0);
+        let contribution = test_boss_contribution();
+
+        assert!(validate_submit_boss_damage(
+            &dungeon,
+            &location,
+            &player_run,
+            &shard,
+            &contribution,
+            Pubkey::default(),
+            Pubkey::default(),
+            8,
+            500,
+            1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn submit_boss_damage_fails_when_submission_limit_exceeded() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_boss_location_account();
+        let mut player_run = test_player_run();
+        // Simulate MAX_BOSS_SUBMISSIONS_PER_PLAYER submissions already made
+        player_run.boss_damage =
+            MAX_BOSS_DAMAGE_PER_SUBMISSION * MAX_BOSS_SUBMISSIONS_PER_PLAYER as u64;
+        let shard = test_boss_damage_shard(0);
+        let contribution = test_boss_contribution();
+
+        assert!(validate_submit_boss_damage(
+            &dungeon,
+            &location,
+            &player_run,
+            &shard,
+            &contribution,
+            Pubkey::default(),
+            Pubkey::default(),
+            8,
+            500,
+            1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn submit_boss_damage_applies_state_correctly() {
+        let mut shard = test_boss_damage_shard(0);
+        let mut contribution = test_boss_contribution();
+        let mut player_run = test_player_run();
+        let damage_score = 500;
+        let now = 1_500;
+
+        let outcome = apply_submit_boss_damage(
+            &mut shard,
+            &mut contribution,
+            &mut player_run,
+            damage_score,
+            now,
+        )
+        .unwrap();
+
+        assert_eq!(shard.total_damage, damage_score);
+        assert_eq!(shard.participant_count, 1);
+        assert_eq!(contribution.total_damage, damage_score);
+        assert_eq!(contribution.last_hit_at, now);
+        assert_eq!(player_run.boss_damage, damage_score);
+        assert!(outcome.is_first_participation);
+        assert_eq!(outcome.shard_total_damage, damage_score);
+        assert_eq!(outcome.participant_count, 1);
+        assert_eq!(outcome.player_total_damage, damage_score);
+    }
+
+    #[test]
+    fn submit_boss_damage_accumulates_damage_on_second_submission() {
+        let mut shard = test_boss_damage_shard(0);
+        let mut contribution = test_boss_contribution();
+        let mut player_run = test_player_run();
+        let now = 1_500;
+
+        // First submission
+        apply_submit_boss_damage(&mut shard, &mut contribution, &mut player_run, 500, now).unwrap();
+
+        // Second submission
+        let outcome = apply_submit_boss_damage(
+            &mut shard,
+            &mut contribution,
+            &mut player_run,
+            300,
+            now + 100,
+        )
+        .unwrap();
+
+        assert_eq!(shard.total_damage, 800);
+        assert_eq!(shard.participant_count, 1); // still 1 participant
+        assert_eq!(contribution.total_damage, 800);
+        assert_eq!(contribution.last_hit_at, now + 100);
+        assert_eq!(player_run.boss_damage, 800);
+        assert!(!outcome.is_first_participation);
+    }
+
+    #[test]
+    fn submit_boss_damage_multiple_players_increment_participant_count() {
+        let mut shard = test_boss_damage_shard(0);
+        let mut player1_contribution = test_boss_contribution();
+        let mut player1_run = test_player_run();
+        let now = 1_500;
+
+        // Player 1 submits
+        apply_submit_boss_damage(
+            &mut shard,
+            &mut player1_contribution,
+            &mut player1_run,
+            500,
+            now,
+        )
+        .unwrap();
+        assert_eq!(shard.participant_count, 1);
+
+        // Player 2 submits (different contribution account)
+        let mut player2_contribution = test_boss_contribution();
+        let mut player2_run = test_player_run();
+        apply_submit_boss_damage(
+            &mut shard,
+            &mut player2_contribution,
+            &mut player2_run,
+            300,
+            now,
+        )
+        .unwrap();
+        assert_eq!(shard.participant_count, 2);
+        assert_eq!(shard.total_damage, 800);
+    }
+
+    #[test]
+    fn compute_boss_shard_index_returns_valid_range() {
+        let player = Pubkey::default();
+        let shard_count = 8;
+
+        for _ in 0..100 {
+            let index = compute_boss_shard_index(player, shard_count);
+            assert!(index < shard_count);
+        }
+    }
+
+    #[test]
+    fn compute_boss_shard_index_is_deterministic() {
+        let player = Pubkey::default();
+        let shard_count = 8;
+
+        let index1 = compute_boss_shard_index(player, shard_count);
+        let index2 = compute_boss_shard_index(player, shard_count);
+        assert_eq!(index1, index2);
+    }
+
+    // ── claim_boss_participation_nft tests ──────────────────────────────────
+
+    #[test]
+    fn claim_boss_nft_succeeds_with_valid_contribution() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let boss_location = test_boss_location();
+        let mut contribution = test_boss_contribution();
+        contribution.total_damage = 500;
+        contribution.player = Pubkey::default();
+        contribution.boss_location = Pubkey::default();
+        let nft_claim = BossNftClaim {
+            day_id: String::new(),
+            player: Pubkey::default(),
+            boss_location: Pubkey::default(),
+            player_damage: 0,
+            shard_index: 0,
+            claimed_at: 0,
+            bump: 0,
+        };
+
+        assert!(validate_claim_boss_participation_nft(
+            &dungeon,
+            &boss_location,
+            &contribution,
+            &nft_claim,
+            Pubkey::default(),
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn claim_boss_nft_fails_when_dungeon_not_open_or_completed() {
+        let dungeon = test_dungeon(DungeonStatus::Pending, 1_000, 2_000);
+        let boss_location = test_boss_location();
+        let mut contribution = test_boss_contribution();
+        contribution.total_damage = 500;
+        contribution.player = Pubkey::default();
+        contribution.boss_location = Pubkey::default();
+        let nft_claim = BossNftClaim {
+            day_id: String::new(),
+            player: Pubkey::default(),
+            boss_location: Pubkey::default(),
+            player_damage: 0,
+            shard_index: 0,
+            claimed_at: 0,
+            bump: 0,
+        };
+
+        assert!(validate_claim_boss_participation_nft(
+            &dungeon,
+            &boss_location,
+            &contribution,
+            &nft_claim,
+            Pubkey::default(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn claim_boss_nft_fails_when_contribution_too_low() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let boss_location = test_boss_location();
+        let contribution = test_boss_contribution(); // total_damage = 0
+        let nft_claim = BossNftClaim {
+            day_id: String::new(),
+            player: Pubkey::default(),
+            boss_location: Pubkey::default(),
+            player_damage: 0,
+            shard_index: 0,
+            claimed_at: 0,
+            bump: 0,
+        };
+
+        assert!(validate_claim_boss_participation_nft(
+            &dungeon,
+            &boss_location,
+            &contribution,
+            &nft_claim,
+            Pubkey::default(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn claim_boss_nft_fails_when_already_claimed() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let boss_location = test_boss_location();
+        let mut contribution = test_boss_contribution();
+        contribution.total_damage = 500;
+        contribution.player = Pubkey::default();
+        contribution.boss_location = Pubkey::default();
+        let nft_claim = BossNftClaim {
+            day_id: "2026-04-25".to_string(),
+            player: Pubkey::default(),
+            boss_location: Pubkey::default(),
+            player_damage: 500,
+            shard_index: 0,
+            claimed_at: 1_500, // already claimed
+            bump: 0,
+        };
+
+        assert!(validate_claim_boss_participation_nft(
+            &dungeon,
+            &boss_location,
+            &contribution,
+            &nft_claim,
+            Pubkey::default(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn claim_boss_nft_fails_when_contribution_player_mismatch() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let boss_location = test_boss_location();
+        let mut contribution = test_boss_contribution();
+        contribution.total_damage = 500;
+        contribution.player = Pubkey::new_unique(); // different player
+        contribution.boss_location = Pubkey::default();
+        let nft_claim = BossNftClaim {
+            day_id: String::new(),
+            player: Pubkey::default(),
+            boss_location: Pubkey::default(),
+            player_damage: 0,
+            shard_index: 0,
+            claimed_at: 0,
+            bump: 0,
+        };
+
+        assert!(validate_claim_boss_participation_nft(
+            &dungeon,
+            &boss_location,
+            &contribution,
+            &nft_claim,
+            Pubkey::default(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn claim_boss_nft_applies_state_correctly() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let boss_location = test_boss_location();
+        let mut contribution = test_boss_contribution();
+        contribution.total_damage = 500;
+        contribution.shard_index = 2;
+        contribution.player = Pubkey::default();
+        contribution.boss_location = Pubkey::default();
+        let mut nft_claim = BossNftClaim {
+            day_id: String::new(),
+            player: Pubkey::default(),
+            boss_location: Pubkey::default(),
+            player_damage: 0,
+            shard_index: 0,
+            claimed_at: 0,
+            bump: 0,
+        };
+        let now = 1_500;
+
+        apply_claim_boss_participation_nft(
+            &mut nft_claim,
+            &dungeon,
+            &boss_location,
+            &contribution,
+            Pubkey::default(),
+            now,
+        )
+        .unwrap();
+
+        assert_eq!(nft_claim.day_id, "2026-04-25");
+        assert_eq!(nft_claim.player, Pubkey::default());
+        assert_eq!(nft_claim.boss_location, Pubkey::default());
+        assert_eq!(nft_claim.player_damage, 500);
+        assert_eq!(nft_claim.shard_index, 2);
+        assert_eq!(nft_claim.claimed_at, now);
+        assert!(nft_claim.claimed());
+    }
+
+    fn test_shop_item_slot_account() -> ShopItemSlotAccount {
+        ShopItemSlotAccount {
+            shop: Pubkey::default(),
+            day_id: "2026-04-25".to_string(),
+            poi_id: "shop-1".to_string(),
+            poi_id_hash: poi_id_hash("shop-1"),
+            slot_index: 0,
+            item_id: "potion-common".to_string(),
+            reward_tier: RewardTier::Common,
+            base_price: 25,
+            base_stock: 3,
+            max_stock: 5,
+            sold_count: 0,
+            restock_interval_seconds: 3_600,
+            max_restock_count: 2,
+            per_wallet_daily_limit: 2,
+            opened_at: 1_000,
+            bump: 249,
+        }
+    }
+
+    fn test_shop_item_slot_account_with_sold(sold: u64) -> ShopItemSlotAccount {
+        let mut slot = test_shop_item_slot_account();
+        slot.sold_count = sold;
+        slot
     }
 
     fn test_dungeon(status: DungeonStatus, start_ts: i64, end_ts: i64) -> DailyDungeon {
@@ -1366,9 +3320,51 @@ mod tests {
             day_id: "2026-04-25".to_string(),
             kind: LocationKind::Enemy,
             poi_id: "enemy-1".to_string(),
+            poi_id_hash: poi_id_hash("enemy-1"),
             status: LocationStatus::Available,
             x: 4,
             y: 7,
+        }
+    }
+
+    fn test_shop_location_account() -> LocationAccount {
+        LocationAccount {
+            base_config_hash: [4; 32],
+            bump: 251,
+            daily_dungeon: Pubkey::default(),
+            day_id: "2026-04-25".to_string(),
+            kind: LocationKind::Shop,
+            poi_id: "shop-1".to_string(),
+            poi_id_hash: poi_id_hash("shop-1"),
+            status: LocationStatus::Available,
+            x: 8,
+            y: 9,
+        }
+    }
+
+    fn test_shop_account(location: Pubkey) -> ShopAccount {
+        ShopAccount {
+            bump: 250,
+            day_id: "2026-04-25".to_string(),
+            keeper_name: "Mira".to_string(),
+            location,
+            opened_at: 1_000,
+            poi_id: "shop-1".to_string(),
+            slot_count: 2,
+        }
+    }
+
+    fn test_shop_item_slot_spec() -> ShopItemSlotSpecInput {
+        ShopItemSlotSpecInput {
+            base_stock: 3,
+            item_id: "potion-common".to_string(),
+            max_restock_count: 2,
+            max_stock: 5,
+            per_wallet_daily_limit: 2,
+            price: 25,
+            restock_interval_seconds: 3_600,
+            reward_tier: RewardTier::Common,
+            slot_id: "shop-1-slot-1".to_string(),
         }
     }
 
@@ -1387,6 +3383,7 @@ mod tests {
             name: "Cavern Scout".to_string(),
             next_available_at: 0,
             poi_id: "enemy-1".to_string(),
+            bump: 252,
             valuable_clear_cap: DEFAULT_VALUABLE_CLEAR_CAP,
         }
     }
@@ -1402,18 +3399,9 @@ mod tests {
             day_id: "2026-04-25".to_string(),
             energy: DEFAULT_PLAYER_RUN_ENERGY,
             entered_at: 1_000,
+            items_purchased: 0,
             player: Pubkey::default(),
             rare_eligibility_points: 0,
-        }
-    }
-
-    fn test_player_performance() -> PlayerPerformanceSummary {
-        PlayerPerformanceSummary {
-            damage_dealt: 100,
-            damage_taken: 0,
-            flawless: true,
-            score: 2_500,
-            turns_taken: 4,
         }
     }
 
@@ -1433,10 +3421,278 @@ mod tests {
             event_id: None,
             kind: LocationKind::Enemy,
             poi_id: "enemy-1".to_string(),
+            poi_id_hash: poi_id_hash("enemy-1"),
             reward_tier: None,
             shop: None,
             x: 4,
             y: 7,
+        }
+    }
+
+    fn test_boss_location_account() -> LocationAccount {
+        LocationAccount {
+            base_config_hash: [5; 32],
+            bump: 248,
+            daily_dungeon: Pubkey::default(),
+            day_id: "2026-04-25".to_string(),
+            kind: LocationKind::Boss,
+            poi_id: "boss-1".to_string(),
+            poi_id_hash: poi_id_hash("boss-1"),
+            status: LocationStatus::Available,
+            x: 10,
+            y: 10,
+        }
+    }
+
+    fn test_boss_location() -> BossLocation {
+        BossLocation {
+            location: Pubkey::default(),
+            day_id: "2026-04-25".to_string(),
+            poi_id: "boss-1".to_string(),
+            boss_id: "boss-dragon".to_string(),
+            name: "Dragon".to_string(),
+            level: 10,
+            base_hp: 50_000,
+            base_damage: 100,
+            reward_tier: RewardTier::Epic,
+            bump: 247,
+        }
+    }
+
+    fn test_boss_damage_shard(shard_index: u16) -> BossDamageShard {
+        BossDamageShard {
+            day_id: "2026-04-25".to_string(),
+            boss_location: Pubkey::default(),
+            shard_index,
+            total_damage: 0,
+            participant_count: 0,
+            bump: 247,
+        }
+    }
+
+    fn test_boss_contribution() -> PlayerBossContribution {
+        PlayerBossContribution {
+            day_id: "".to_string(),
+            player: Pubkey::default(),
+            boss_location: Pubkey::default(),
+            shard_index: 0,
+            total_damage: 0,
+            last_hit_at: 0,
+            bump: 246,
+        }
+    }
+
+    // ── claim_daily_reward tests ─────────────────────────────────────────────
+
+    #[test]
+    fn claim_daily_reward_fails_before_end_ts() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let player_run = test_player_run();
+        let claim = test_daily_reward_claim_unclaimed();
+        let dungeon_key = Pubkey::default();
+
+        // now=1_500 < end_ts=2_000 → should fail
+        assert!(validate_claim_daily_reward(
+            &dungeon,
+            &player_run,
+            &claim,
+            Pubkey::default(),
+            dungeon_key,
+            1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn claim_daily_reward_fails_when_player_run_not_active() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let mut player_run = test_player_run();
+        player_run.active = false;
+        let claim = test_daily_reward_claim_unclaimed();
+        let dungeon_key = Pubkey::default();
+
+        assert!(validate_claim_daily_reward(
+            &dungeon,
+            &player_run,
+            &claim,
+            Pubkey::default(),
+            dungeon_key,
+            3_000,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn claim_daily_reward_fails_when_already_claimed() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let player_run = test_player_run();
+        let claim = DailyRewardClaim {
+            day_id: "2026-04-25".to_string(),
+            player: Pubkey::default(),
+            reward_pool: Pubkey::default(),
+            reward_tier: RewardTier::Uncommon,
+            amount: 0,
+            claimed_at: 2_500, // already claimed
+            bump: 0,
+        };
+        let dungeon_key = Pubkey::default();
+
+        assert!(validate_claim_daily_reward(
+            &dungeon,
+            &player_run,
+            &claim,
+            Pubkey::default(),
+            dungeon_key,
+            3_000,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn claim_daily_reward_fails_when_player_mismatch() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let mut player_run = test_player_run();
+        player_run.player = Pubkey::new_unique(); // different player
+        let claim = test_daily_reward_claim_unclaimed();
+        let dungeon_key = Pubkey::default();
+
+        assert!(validate_claim_daily_reward(
+            &dungeon,
+            &player_run,
+            &claim,
+            Pubkey::default(),
+            dungeon_key,
+            3_000,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn claim_daily_reward_succeeds_after_end_ts_with_valid_run() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let player_run = test_player_run();
+        let claim = test_daily_reward_claim_unclaimed();
+        let dungeon_key = Pubkey::default();
+
+        assert!(validate_claim_daily_reward(
+            &dungeon,
+            &player_run,
+            &claim,
+            Pubkey::default(),
+            dungeon_key,
+            3_000, // after end_ts
+        )
+        .is_ok());
+    }
+
+    // ── compute_daily_reward_tier tests ──────────────────────────────────────
+
+    #[test]
+    fn reward_tier_uncommon_with_3_cleared_locations() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let mut player_run = test_player_run();
+        player_run.cleared_locations = 3;
+
+        let tier = compute_daily_reward_tier(&dungeon, &player_run).unwrap();
+        assert_eq!(tier, RewardTier::Uncommon);
+    }
+
+    #[test]
+    fn reward_tier_rare_with_8_cleared_and_500_boss_damage() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let mut player_run = test_player_run();
+        player_run.cleared_locations = 8;
+        player_run.boss_damage = 500;
+
+        let tier = compute_daily_reward_tier(&dungeon, &player_run).unwrap();
+        assert_eq!(tier, RewardTier::Rare);
+    }
+
+    #[test]
+    fn reward_tier_rare_requires_both_cleared_and_boss_damage() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let mut player_run = test_player_run();
+        player_run.cleared_locations = 8;
+        player_run.boss_damage = 0; // insufficient boss damage for Rare
+
+        let tier = compute_daily_reward_tier(&dungeon, &player_run).unwrap();
+        assert_eq!(tier, RewardTier::Uncommon); // falls back to Uncommon
+    }
+
+    #[test]
+    fn reward_tier_epic_with_12_cleared_and_1500_boss_damage() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let mut player_run = test_player_run();
+        player_run.cleared_locations = 12;
+        player_run.boss_damage = 1500;
+
+        let tier = compute_daily_reward_tier(&dungeon, &player_run).unwrap();
+        assert_eq!(tier, RewardTier::Epic);
+    }
+
+    #[test]
+    fn reward_tier_legendary_is_deterministic_for_same_inputs() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let mut player_run = test_player_run();
+        player_run.cleared_locations = 12;
+        player_run.boss_damage = 1500;
+
+        let tier1 = compute_daily_reward_tier(&dungeon, &player_run).unwrap();
+        let tier2 = compute_daily_reward_tier(&dungeon, &player_run).unwrap();
+        // Both calls must return the same tier (deterministic)
+        assert_eq!(tier1, tier2);
+    }
+
+    #[test]
+    fn reward_tier_fails_when_no_conditions_met() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let player_run = test_player_run(); // cleared_locations=0, boss_damage=0
+
+        assert!(compute_daily_reward_tier(&dungeon, &player_run).is_err());
+    }
+
+    #[test]
+    fn reward_tier_2_cleared_locations_is_not_enough_for_uncommon() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let mut player_run = test_player_run();
+        player_run.cleared_locations = 2;
+
+        assert!(compute_daily_reward_tier(&dungeon, &player_run).is_err());
+    }
+
+    // ── apply_claim_daily_reward tests ───────────────────────────────────────
+
+    #[test]
+    fn apply_claim_daily_reward_sets_fields_correctly() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let mut claim = test_daily_reward_claim_unclaimed();
+        let now = 3_000;
+
+        apply_claim_daily_reward(
+            &mut claim,
+            &dungeon,
+            RewardTier::Epic,
+            Pubkey::default(),
+            now,
+        )
+        .unwrap();
+
+        assert_eq!(claim.day_id, "2026-04-25");
+        assert_eq!(claim.player, Pubkey::default());
+        assert_eq!(claim.reward_tier, RewardTier::Epic);
+        assert_eq!(claim.claimed_at, now);
+        assert!(claim.claimed());
+    }
+
+    fn test_daily_reward_claim_unclaimed() -> DailyRewardClaim {
+        DailyRewardClaim {
+            day_id: String::new(),
+            player: Pubkey::default(),
+            reward_pool: Pubkey::default(),
+            reward_tier: RewardTier::Common,
+            amount: 0,
+            claimed_at: 0,
+            bump: 0,
         }
     }
 

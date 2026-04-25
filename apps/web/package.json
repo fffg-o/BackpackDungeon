@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@backpack-dungeon/cnft-adapter": "workspace:*",
     "@backpack-dungeon/game-core": "workspace:*",
     "@backpack-dungeon/shared": "workspace:*",
     "next": "^15.4.0",
