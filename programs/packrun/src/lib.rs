@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use solana_sha256_hasher::hash;
 
-declare_id!("AKGsUEW5WUdUQ6vWVkWWLF4CosWHfWTPMsfckWKTpvtL");
+declare_id!("2XrgDT4bcQkTTtbFJLapNUSVg1Bwv8jMdHdQ9ZTCMpRA");
 
 pub const DAILY_DUNGEON_SEED: &[u8] = b"dungeon";
 pub const LOCATION_SEED: &[u8] = b"location";

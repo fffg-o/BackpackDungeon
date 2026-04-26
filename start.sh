@@ -10,11 +10,12 @@
 #   ./start.sh --clean      # Clean all build artifacts and start fresh
 #
 # This script:
-#   1. Installs dependencies (pnpm install)
-#   2. Builds the Anchor program (if needed)
-#   3. Starts a Solana localnet validator (if not already running)
-#   4. Deploys the Anchor program to localnet
-#   5. Starts the Next.js web frontend
+#   1. Installs dependencies (pnpm install) — checks ROOT + sub-packages
+#   2. Builds all workspace packages (shared, game-core, cnft-adapter)
+#   3. Builds the Anchor program (if needed)
+#   4. Starts a Solana localnet validator (if not already running)
+#   5. Deploys the Anchor program to localnet
+#   6. Starts the Next.js web frontend
 # ──────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -40,7 +41,12 @@ WEB_DIR="$PROJECT_ROOT/apps/web"
 ANCHOR_KEYPAIR="$HOME/.config/solana/id.json"
 VALIDATOR_LEDGER="$PROJECT_ROOT/.anchor/test-ledger"
 VALIDATOR_LOG="$PROJECT_ROOT/.anchor/validator.log"
-ANCHOR_PROGRAM_ID="AKGsUEW5WUdUQ6vWVkWWLF4CosWHfWTPMsfckWKTpvtL"
+ANCHOR_PROGRAM_ID="2XrgDT4bcQkTTtbFJLapNUSVg1Bwv8jMdHdQ9ZTCMpRA"
+
+# Sub-package dist directories to check for initialization
+SHARED_DIST="$PROJECT_ROOT/packages/shared/dist"
+GAME_CORE_DIST="$PROJECT_ROOT/packages/game-core/dist"
+CNFT_ADAPTER_DIST="$PROJECT_ROOT/packages/cnft-adapter/dist"
 
 # Parse flags
 SKIP_BUILD=false
@@ -62,6 +68,41 @@ for arg in "$@"; do
   esac
 done
 
+# ── Helper functions ──────────────────────────────────────────────────────────
+
+# Check if a directory exists and has files
+dir_has_files() {
+  [ -d "$1" ] && [ "$(ls -A "$1" 2>/dev/null)" ]
+}
+
+# Ensure all workspace packages are built
+ensure_packages_built() {
+  local needs_build=false
+
+  if ! dir_has_files "$SHARED_DIST"; then
+    log_info "shared dist not found, needs build"
+    needs_build=true
+  fi
+
+  if ! dir_has_files "$GAME_CORE_DIST"; then
+    log_info "game-core dist not found, needs build"
+    needs_build=true
+  fi
+
+  if ! dir_has_files "$CNFT_ADAPTER_DIST"; then
+    log_info "cnft-adapter dist not found, needs build"
+    needs_build=true
+  fi
+
+  if [ "$needs_build" = true ]; then
+    log_info "Building workspace packages..."
+    cd "$PROJECT_ROOT" && pnpm build
+    log_ok "Workspace packages built"
+  else
+    log_ok "All packages already built"
+  fi
+}
+
 # ── Clean mode ────────────────────────────────────────────────────────────────
 if [ "$CLEAN" = true ]; then
   log_step "Cleaning all build artifacts..."
@@ -69,6 +110,7 @@ if [ "$CLEAN" = true ]; then
   rm -rf "$PROJECT_ROOT/target" 2>/dev/null || true
   rm -rf "$PROJECT_ROOT/.anchor" 2>/dev/null || true
   rm -rf "$PROJECT_ROOT/node_modules/.cache" 2>/dev/null || true
+  rm -rf "$SHARED_DIST" "$GAME_CORE_DIST" "$CNFT_ADAPTER_DIST" 2>/dev/null || true
   log_ok "Clean complete. Run without --clean to start fresh."
   exit 0
 fi
@@ -107,23 +149,35 @@ fi
 if [ "$RUN_TESTS" = true ]; then
   log_step "Running test suite"
 
-  # Ensure dependencies are installed
-  if [ ! -d "$PROJECT_ROOT/node_modules" ]; then
+  # Ensure dependencies are installed (check root + key sub-packages)
+  if [ ! -d "$PROJECT_ROOT/node_modules" ] || [ ! -d "$WEB_DIR/node_modules" ]; then
     log_info "Installing dependencies..."
     cd "$PROJECT_ROOT" && pnpm install
+    log_ok "Dependencies installed"
+  else
+    log_ok "Dependencies already installed"
   fi
 
-  # Build packages first
-  log_info "Building packages..."
-  cd "$PROJECT_ROOT" && pnpm -r --if-present build 2>/dev/null || true
+  # Build workspace packages if needed (shared, game-core, cnft-adapter)
+  ensure_packages_built
 
   # Run game-core unit tests
   log_info "Running game-core unit tests..."
-  cd "$PROJECT_ROOT/packages/game-core" && pnpm test 2>/dev/null || true
+  cd "$PROJECT_ROOT/packages/game-core" && pnpm test 2>/dev/null || {
+    log_warn "game-core unit tests failed or not configured"
+  }
 
   # Run shared unit tests
   log_info "Running shared unit tests..."
-  cd "$PROJECT_ROOT/packages/shared" && pnpm test 2>/dev/null || true
+  cd "$PROJECT_ROOT/packages/shared" && pnpm test 2>/dev/null || {
+    log_warn "shared unit tests failed or not configured"
+  }
+
+  # Run gameplay integration tests (off-chain, no validator needed)
+  log_info "Running gameplay integration tests..."
+  cd "$PROJECT_ROOT" && node --experimental-strip-types --test tests/packrun.gameplay.test.mjs 2>&1 || {
+    log_warn "Gameplay tests encountered issues"
+  }
 
   # Run Anchor integration tests (requires validator)
   log_info "Running Anchor integration tests..."
@@ -146,6 +200,11 @@ else
   log_ok "Dependencies already installed (run 'pnpm install' to update)"
 fi
 
+# ── Step 1b: Build workspace packages ─────────────────────────────────────────
+log_step "Step 1b: Building workspace packages"
+
+ensure_packages_built
+
 # ── Step 2: Build Anchor program ──────────────────────────────────────────────
 if [ "$SKIP_BUILD" = false ]; then
   log_step "Step 2: Building Anchor program"
@@ -159,18 +218,18 @@ fi
 # ── Step 3: Start Solana localnet validator ───────────────────────────────────
 log_step "Step 3: Starting Solana localnet validator"
 
-# Check if validator is already running
-if solana config get 2>/dev/null | grep -q "localnet"; then
-  if nc -z 127.0.0.1 8899 2>/dev/null; then
-    log_ok "Validator already running on port 8899"
-  fi
-else
-  log_info "Setting Solana config to localnet..."
-  solana config set --url http://127.0.0.1:8899 2>/dev/null || true
-fi
+# Ensure Solana config points to localnet
+solana config set --url http://127.0.0.1:8899 2>/dev/null || true
+
+# Helper: check if the validator JSON-RPC health endpoint is reachable
+validator_is_ready() {
+  curl -s --connect-timeout 2 -o /dev/null -w "%{http_code}" http://127.0.0.1:8899/health 2>/dev/null | grep -q "200"
+}
 
 # Start validator if not already running
-if ! nc -z 127.0.0.1 8899 2>/dev/null; then
+if validator_is_ready; then
+  log_ok "Validator already running on port 8899"
+else
   mkdir -p "$(dirname "$VALIDATOR_LOG")"
 
   log_info "Starting validator (background, log: $VALIDATOR_LOG)..."
@@ -196,7 +255,7 @@ if ! nc -z 127.0.0.1 8899 2>/dev/null; then
   # Wait for validator to be ready
   log_info "Waiting for validator to start..."
   for i in $(seq 1 30); do
-    if nc -z 127.0.0.1 8899 2>/dev/null; then
+    if validator_is_ready; then
       log_ok "Validator is ready (PID: $VALIDATOR_PID)"
       break
     fi
@@ -210,8 +269,6 @@ if ! nc -z 127.0.0.1 8899 2>/dev/null; then
   # Airdrop SOL to deployer
   sleep 2
   solana airdrop 500 "$(solana address)" 2>/dev/null || log_warn "Airdrop failed (may already have SOL)"
-else
-  log_ok "Validator already running on port 8899"
 fi
 
 # ── Step 4: Deploy Anchor program ─────────────────────────────────────────────
@@ -228,8 +285,24 @@ cd "$PROJECT_ROOT" && anchor deploy --provider.cluster localnet 2>/dev/null || {
 
 log_ok "Program deployed (or already deployed)"
 
+# ── Step 4.5: Initialize today's DailyDungeon ─────────────────────────────────
+log_step "Step 4.5: Initializing today's DailyDungeon"
+
+# Set RPC URL + wallet for Anchor provider used by the init script
+export ANCHOR_PROVIDER_URL="http://127.0.0.1:8899"
+export ANCHOR_WALLET="$ANCHOR_KEYPAIR"
+
+cd "$PROJECT_ROOT" && node scripts/init-daily-dungeon.mjs && {
+  log_ok "DailyDungeon initialized for $(date +%F)"
+} || {
+  log_warn "DailyDungeon init failed (might already be initialized); continuing..."
+}
+
 # ── Step 5: Start web frontend ────────────────────────────────────────────────
 log_step "Step 5: Starting web frontend"
+
+# Ensure the web frontend uses the localnet RPC (not devnet)
+export NEXT_PUBLIC_SOLANA_RPC_URL="http://127.0.0.1:8899"
 
 log_info "Starting Next.js dev server on http://localhost:3000 ..."
 cd "$PROJECT_ROOT" && pnpm dev:web

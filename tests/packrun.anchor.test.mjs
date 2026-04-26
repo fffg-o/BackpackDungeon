@@ -31,7 +31,7 @@ import idl from "../target/idl/packrun.json" with { type: "json" };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const PROGRAM_ID = new PublicKey("AKGsUEW5WUdUQ6vWVkWWLF4CosWHfWTPMsfckWKTpvtL");
+const PROGRAM_ID = new PublicKey("2XrgDT4bcQkTTtbFJLapNUSVg1Bwv8jMdHdQ9ZTCMpRA");
 
 const MASTER_SEED = "packrun-master";
 const DAY_ID = "2026-04-25";

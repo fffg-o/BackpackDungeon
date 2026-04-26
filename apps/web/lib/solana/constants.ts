@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 
 export const PACKRUN_PROGRAM_ID =
   process.env.NEXT_PUBLIC_PACKRUN_PROGRAM_ID ??
-  "AKGsUEW5WUdUQ6vWVkWWLF4CosWHfWTPMsfckWKTpvtL";
+  "2XrgDT4bcQkTTtbFJLapNUSVg1Bwv8jMdHdQ9ZTCMpRA";
 
 export const SOLANA_RPC_URL =
   process.env.NEXT_PUBLIC_SOLANA_RPC_URL ??

@@ -334,11 +334,7 @@ test("enemy reward tier computation", () => {
   const enemy = map.locations.find((l) => l.kind === LocationKind.Enemy && l.enemy);
   assert.ok(enemy?.enemy);
 
-  const tier = computeEnemyRewardTier(MASTER_SEED, enemy.enemy, 0, {
-    damageTaken: 10,
-    flawless: false,
-    turnsTaken: 5,
-  });
+  const tier = computeEnemyRewardTier(enemy.enemy, 0);
 
   assert.ok([RewardTier.Common, RewardTier.Uncommon, RewardTier.Rare].includes(tier));
 });
@@ -721,7 +717,7 @@ test("pickWeighted selects from weighted items", () => {
   const results = new Set();
   for (let i = 0; i < 200; i++) {
     const picked = pickWeighted(MASTER_SEED, i, items);
-    results.add(picked.item);
+    results.add(picked);
   }
 
   // All items should be picked at least once in 200 trials

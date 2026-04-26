@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-packrun = "AKGsUEW5WUdUQ6vWVkWWLF4CosWHfWTPMsfckWKTpvtL"
+packrun = "2XrgDT4bcQkTTtbFJLapNUSVg1Bwv8jMdHdQ9ZTCMpRA"
 
 [registry]
 url = "https://api.apr.dev"
