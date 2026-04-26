@@ -7,9 +7,18 @@
     "build": "pnpm -r --workspace-concurrency=1 build",
     "test": "pnpm -r --if-present test",
     "dev:web": "pnpm --filter @backpack-dungeon/web dev",
+    "test:gameplay": "node --experimental-strip-types --test tests/packrun.gameplay.test.mjs",
+    "test:anchor": "NO_DNA=1 anchor test",
     "anchor:test": "NO_DNA=1 anchor test"
   },
+  "dependencies": {
+    "@backpack-dungeon/cnft-adapter": "workspace:*",
+    "@backpack-dungeon/game-core": "workspace:*",
+    "@backpack-dungeon/shared": "workspace:*"
+  },
   "devDependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/web3.js": "^1.98.4",
     "@types/node": "^24.0.0",
     "typescript": "^5.8.0"
   }
