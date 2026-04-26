@@ -41,7 +41,7 @@ WEB_DIR="$PROJECT_ROOT/apps/web"
 ANCHOR_KEYPAIR="$HOME/.config/solana/id.json"
 VALIDATOR_LEDGER="$PROJECT_ROOT/.anchor/test-ledger"
 VALIDATOR_LOG="$PROJECT_ROOT/.anchor/validator.log"
-ANCHOR_PROGRAM_ID="2XrgDT4bcQkTTtbFJLapNUSVg1Bwv8jMdHdQ9ZTCMpRA"
+ANCHOR_PROGRAM_ID="Hj9xusyzfxP8ic9U6rmpGcY4pPGFBJQqm7BUJ4w475jU"
 
 # Sub-package dist directories to check for initialization
 SHARED_DIST="$PROJECT_ROOT/packages/shared/dist"
@@ -288,7 +288,7 @@ log_ok "Program deployed (or already deployed)"
 # ── Step 4.5: Initialize today's DailyDungeon ─────────────────────────────────
 log_step "Step 4.5: Initializing today's DailyDungeon"
 
-# Set RPC URL + wallet for Anchor provider used by the init script
+# Set RPC URL + wallet for Anchor provider used by the init scripts
 export ANCHOR_PROVIDER_URL="http://127.0.0.1:8899"
 export ANCHOR_WALLET="$ANCHOR_KEYPAIR"
 
@@ -296,6 +296,15 @@ cd "$PROJECT_ROOT" && node scripts/init-daily-dungeon.mjs && {
   log_ok "DailyDungeon initialized for $(date +%F)"
 } || {
   log_warn "DailyDungeon init failed (might already be initialized); continuing..."
+}
+
+# ── Step 4.6: Crank — initialize all POI LocationAccount PDAs ─────────────────
+log_step "Step 4.6: Crank — initializing all POI locations from Merkle tree"
+
+cd "$PROJECT_ROOT" && node scripts/init-all-locations.mjs && {
+  log_ok "All POI locations initialized for $(date +%F)"
+} || {
+  log_warn "POI location init encountered errors (check logs above); continuing..."
 }
 
 # ── Step 5: Start web frontend ────────────────────────────────────────────────

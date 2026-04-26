@@ -1,5 +1,5 @@
 {
-  "address": "2XrgDT4bcQkTTtbFJLapNUSVg1Bwv8jMdHdQ9ZTCMpRA",
+  "address": "Hj9xusyzfxP8ic9U6rmpGcY4pPGFBJQqm7BUJ4w475jU",
   "metadata": {
     "name": "packrun",
     "version": "0.1.0",
@@ -729,6 +729,155 @@
       ]
     },
     {
+      "name": "init_boss_damage_shard",
+      "discriminator": [
+        38,
+        134,
+        12,
+        121,
+        147,
+        215,
+        38,
+        202
+      ],
+      "accounts": [
+        {
+          "name": "daily_dungeon",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "location_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "boss_poi_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boss_location",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "boss_poi_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boss_damage_shard",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115,
+                  95,
+                  115,
+                  104,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "shard_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "day_id",
+          "type": "string"
+        },
+        {
+          "name": "boss_poi_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "shard_index",
+          "type": "u16"
+        }
+      ]
+    },
+    {
       "name": "init_daily_dungeon",
       "discriminator": [
         190,
@@ -1161,155 +1310,6 @@
               "name": "ShopItemSlotSpecInput"
             }
           }
-        }
-      ]
-    },
-    {
-      "name": "init_boss_damage_shard",
-      "discriminator": [
-        38,
-        134,
-        12,
-        121,
-        147,
-        215,
-        38,
-        202
-      ],
-      "accounts": [
-        {
-          "name": "daily_dungeon",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  100,
-                  117,
-                  110,
-                  103,
-                  101,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day_id"
-              }
-            ]
-          }
-        },
-        {
-          "name": "location_account",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  108,
-                  111,
-                  99,
-                  97,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day_id"
-              },
-              {
-                "kind": "arg",
-                "path": "boss_poi_hash"
-              }
-            ]
-          }
-        },
-        {
-          "name": "boss_location",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  98,
-                  111,
-                  115,
-                  115
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day_id"
-              },
-              {
-                "kind": "arg",
-                "path": "boss_poi_hash"
-              }
-            ]
-          }
-        },
-        {
-          "name": "boss_damage_shard",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  98,
-                  111,
-                  115,
-                  115,
-                  95,
-                  115,
-                  104,
-                  97,
-                  114,
-                  100
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "day_id"
-              },
-              {
-                "kind": "arg",
-                "path": "shard_index"
-              }
-            ]
-          }
-        },
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "day_id",
-          "type": "string"
-        },
-        {
-          "name": "boss_poi_hash",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
-        },
-        {
-          "name": "shard_index",
-          "type": "u16"
         }
       ]
     },

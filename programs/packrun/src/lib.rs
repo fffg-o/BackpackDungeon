@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use solana_sha256_hasher::hash;
 
-declare_id!("2XrgDT4bcQkTTtbFJLapNUSVg1Bwv8jMdHdQ9ZTCMpRA");
+declare_id!("Hj9xusyzfxP8ic9U6rmpGcY4pPGFBJQqm7BUJ4w475jU");
 
 pub const DAILY_DUNGEON_SEED: &[u8] = b"dungeon";
 pub const LOCATION_SEED: &[u8] = b"location";
@@ -153,118 +153,23 @@ pub mod packrun {
         location.base_config_hash = spec.base_config_hash;
         location.bump = ctx.bumps.location_account;
 
+        // NOTE: Detail sub-accounts (EnemyLocation, ShopAccount, BossLocation)
+        // are initialized in separate instructions (init_enemy_detail,
+        // init_shop_detail, init_boss_detail) to work around an Anchor v0.32.1
+        // bug where Option<Account> with init constraints uses Pubkey::default()
+        // instead of the declare_id! program ID for PDA derivation.
         match spec.kind {
-            LocationKind::Enemy => {
-                let enemy = spec
-                    .enemy
-                    .as_ref()
-                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
-                let enemy_location = ctx
-                    .accounts
-                    .enemy_location
-                    .as_mut()
-                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
-                require!(
-                    ctx.accounts.shop_account.is_none() && ctx.accounts.boss_location.is_none(),
-                    PackrunError::UnexpectedLocationDetail
-                );
-
-                enemy_location.location = location.key();
-                enemy_location.day_id = spec.day_id.clone();
-                enemy_location.poi_id = spec.poi_id.clone();
-                enemy_location.enemy_id = enemy.id.clone();
-                enemy_location.name = enemy.name.clone();
-                enemy_location.level = enemy.level;
-                enemy_location.base_hp = enemy.max_health;
-                enemy_location.base_damage = enemy.attack;
-                enemy_location.difficulty_level = enemy.level;
-                enemy_location.max_reward_tier = enemy.reward_tier;
-                enemy_location.valuable_clear_cap = DEFAULT_VALUABLE_CLEAR_CAP;
-                enemy_location.clear_count = 0;
-                enemy_location.base_cooldown_seconds = DEFAULT_ENEMY_BASE_COOLDOWN_SECONDS;
-                enemy_location.next_available_at = 0;
-                enemy_location.bump = ctx
-                    .bumps
-                    .enemy_location
-                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
-                ctx.accounts.daily_dungeon.enemy_count =
-                    ctx.accounts.daily_dungeon.enemy_count.saturating_add(1);
-            }
-            LocationKind::Shop => {
-                let shop = spec
-                    .shop
-                    .as_ref()
-                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
-                let shop_account = ctx
-                    .accounts
-                    .shop_account
-                    .as_mut()
-                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
-                require!(
-                    ctx.accounts.enemy_location.is_none() && ctx.accounts.boss_location.is_none(),
-                    PackrunError::UnexpectedLocationDetail
-                );
-
-                shop_account.location = location.key();
-                shop_account.day_id = spec.day_id.clone();
-                shop_account.poi_id = spec.poi_id.clone();
-                shop_account.keeper_name = shop.keeper_name.clone().unwrap_or_default();
-                shop_account.slot_count = shop.item_slots.len() as u16;
-                shop_account.opened_at = Clock::get()?.unix_timestamp;
-                shop_account.bump = ctx
-                    .bumps
-                    .shop_account
-                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
-                ctx.accounts.daily_dungeon.shop_count =
-                    ctx.accounts.daily_dungeon.shop_count.saturating_add(1);
-            }
-            LocationKind::Boss => {
-                let boss = spec
-                    .boss
-                    .as_ref()
-                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
-                let boss_location = ctx
-                    .accounts
-                    .boss_location
-                    .as_mut()
-                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
-                require!(
-                    ctx.accounts.enemy_location.is_none() && ctx.accounts.shop_account.is_none(),
-                    PackrunError::UnexpectedLocationDetail
-                );
-                boss_location.location = location.key();
-                boss_location.day_id = spec.day_id.clone();
-                boss_location.poi_id = spec.poi_id.clone();
-                boss_location.boss_id = boss.id.clone();
-                boss_location.name = boss.name.clone();
-                boss_location.level = boss.level;
-                boss_location.base_hp = boss.max_health;
-                boss_location.base_damage = boss.attack;
-                boss_location.reward_tier = boss.reward_tier;
-                boss_location.bump = ctx
-                    .bumps
-                    .boss_location
-                    .ok_or(error!(PackrunError::MissingLocationDetail))?;
-                ctx.accounts.daily_dungeon.boss_count =
-                    ctx.accounts.daily_dungeon.boss_count.saturating_add(1);
+            LocationKind::Enemy | LocationKind::Shop | LocationKind::Boss => {
+                // Location account is created; detail account is handled by
+                // the corresponding init_*_detail instruction which also
+                // increments the daily_dungeon counter for this kind.
             }
             LocationKind::Treasure => {
-                require!(
-                    ctx.accounts.enemy_location.is_none()
-                        && ctx.accounts.shop_account.is_none()
-                        && ctx.accounts.boss_location.is_none(),
-                    PackrunError::UnexpectedLocationDetail
-                );
                 ctx.accounts.daily_dungeon.treasure_count =
                     ctx.accounts.daily_dungeon.treasure_count.saturating_add(1);
             }
             LocationKind::Event => {
-                require!(
-                    ctx.accounts.enemy_location.is_none()
-                        && ctx.accounts.shop_account.is_none()
-                        && ctx.accounts.boss_location.is_none(),
-                    PackrunError::UnexpectedLocationDetail
-                );
+                // No additional state needed for event locations.
             }
         }
 
@@ -272,6 +177,165 @@ pub mod packrun {
         ctx.accounts.daily_dungeon.location_count =
             ctx.accounts.daily_dungeon.location_count.saturating_add(1);
         ctx.accounts.daily_dungeon.updated_at = now;
+
+        Ok(())
+    }
+
+    /// Initialise the EnemyLocation detail sub-account for an Enemy POI.
+    ///
+    /// Must be called after `init_location_from_merkle` for each Enemy location.
+    /// This is a separate instruction (not combined with `init_location_from_merkle`)
+    /// to work around an Anchor v0.32.1 bug where `Option<Account>` with `init`
+    /// constraints incorrectly uses `Pubkey::default()` (SystemProgram) instead of
+    /// the `declare_id!()` program ID for PDA derivation.
+    pub fn init_enemy_detail(
+        ctx: Context<InitEnemyDetail>,
+        day_id: String,
+        poi_id: String,
+        poi_id_hash: [u8; 32],
+        spec: LocationSpecInput,
+    ) -> Result<()> {
+        let enemy = spec
+            .enemy
+            .as_ref()
+            .ok_or(error!(PackrunError::MissingLocationDetail))?;
+
+        // Manually create PDA via CPI to bypass Anchor v0.32.1 init+seeds bug
+        let bump = create_pda_account(
+            &ctx.accounts.authority,
+            &ctx.accounts.enemy_location,
+            &ctx.accounts.system_program,
+            ENEMY_LOCATION_SEED,
+            &day_id,
+            &poi_id_hash,
+            ENEMY_LOCATION_SPACE,
+            &crate::ID,
+        )?;
+
+        let enemy_location = EnemyLocation {
+            location: ctx.accounts.location_account.key(),
+            day_id,
+            poi_id,
+            enemy_id: enemy.id.clone(),
+            name: enemy.name.clone(),
+            level: enemy.level,
+            base_hp: enemy.max_health,
+            base_damage: enemy.attack,
+            difficulty_level: enemy.level,
+            max_reward_tier: enemy.reward_tier,
+            valuable_clear_cap: DEFAULT_VALUABLE_CLEAR_CAP,
+            clear_count: 0,
+            base_cooldown_seconds: DEFAULT_ENEMY_BASE_COOLDOWN_SECONDS,
+            next_available_at: 0,
+            bump,
+        };
+
+        // Serialize account data (discriminator + borsh fields)
+        let data = &mut ctx.accounts.enemy_location.data;
+        let mut slice: &mut [u8] = &mut *data.borrow_mut();
+        enemy_location.try_serialize(&mut slice)?;
+
+        ctx.accounts.daily_dungeon.enemy_count =
+            ctx.accounts.daily_dungeon.enemy_count.saturating_add(1);
+
+        Ok(())
+    }
+
+    /// Initialise the ShopAccount detail sub-account for a Shop POI.
+    ///
+    /// Must be called after `init_location_from_merkle` for each Shop location.
+    pub fn init_shop_detail(
+        ctx: Context<InitShopDetail>,
+        day_id: String,
+        poi_id: String,
+        poi_id_hash: [u8; 32],
+        spec: LocationSpecInput,
+    ) -> Result<()> {
+        let shop = spec
+            .shop
+            .as_ref()
+            .ok_or(error!(PackrunError::MissingLocationDetail))?;
+
+        // Manually create PDA via CPI to bypass Anchor v0.32.1 init+seeds bug
+        let bump = create_pda_account(
+            &ctx.accounts.authority,
+            &ctx.accounts.shop_account,
+            &ctx.accounts.system_program,
+            SHOP_SEED,
+            &day_id,
+            &poi_id_hash,
+            SHOP_ACCOUNT_SPACE,
+            &crate::ID,
+        )?;
+
+        let shop_account = ShopAccount {
+            location: ctx.accounts.location_account.key(),
+            day_id,
+            poi_id,
+            keeper_name: shop.keeper_name.clone().unwrap_or_default(),
+            slot_count: shop.item_slots.len() as u16,
+            opened_at: Clock::get()?.unix_timestamp,
+            bump,
+        };
+
+        // Serialize account data (discriminator + borsh fields)
+        let data = &mut ctx.accounts.shop_account.data;
+        let mut slice: &mut [u8] = &mut *data.borrow_mut();
+        shop_account.try_serialize(&mut slice)?;
+
+        ctx.accounts.daily_dungeon.shop_count =
+            ctx.accounts.daily_dungeon.shop_count.saturating_add(1);
+
+        Ok(())
+    }
+
+    /// Initialise the BossLocation detail sub-account for a Boss POI.
+    ///
+    /// Must be called after `init_location_from_merkle` for each Boss location.
+    pub fn init_boss_detail(
+        ctx: Context<InitBossDetail>,
+        day_id: String,
+        poi_id: String,
+        poi_id_hash: [u8; 32],
+        spec: LocationSpecInput,
+    ) -> Result<()> {
+        let boss = spec
+            .boss
+            .as_ref()
+            .ok_or(error!(PackrunError::MissingLocationDetail))?;
+
+        // Manually create PDA via CPI to bypass Anchor v0.32.1 init+seeds bug
+        let bump = create_pda_account(
+            &ctx.accounts.authority,
+            &ctx.accounts.boss_location,
+            &ctx.accounts.system_program,
+            BOSS_LOCATION_SEED,
+            &day_id,
+            &poi_id_hash,
+            BOSS_LOCATION_SPACE,
+            &crate::ID,
+        )?;
+
+        let boss_location = BossLocation {
+            location: ctx.accounts.location_account.key(),
+            day_id,
+            poi_id,
+            boss_id: boss.id.clone(),
+            name: boss.name.clone(),
+            level: boss.level,
+            base_hp: boss.max_health,
+            base_damage: boss.attack,
+            reward_tier: boss.reward_tier,
+            bump,
+        };
+
+        // Serialize account data (discriminator + borsh fields)
+        let data = &mut ctx.accounts.boss_location.data;
+        let mut slice: &mut [u8] = &mut *data.borrow_mut();
+        boss_location.try_serialize(&mut slice)?;
+
+        ctx.accounts.daily_dungeon.boss_count =
+            ctx.accounts.daily_dungeon.boss_count.saturating_add(1);
 
         Ok(())
     }
@@ -460,6 +524,7 @@ pub mod packrun {
             &mut ctx.accounts.player_run,
             damage_score,
             now,
+            ctx.bumps.player_boss_contribution,
         )?;
 
         emit!(BossDamageSubmitted {
@@ -606,30 +671,120 @@ pub struct InitLocationFromMerkle<'info> {
         bump
     )]
     pub location_account: Account<'info, LocationAccount>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Helper: manually create a PDA account via system program CPI.
+/// Bypasses Anchor's `#[account(init, seeds, bump)]` macro which in v0.32.1
+/// sometimes uses `Pubkey::default()` instead of `declare_id!()` for PDA derivation.
+fn create_pda_account<'info>(
+    authority: &Signer<'info>,
+    target: &AccountInfo<'info>,
+    system_program: &Program<'info, System>,
+    seed_prefix: &[u8],
+    day_id: &str,
+    poi_id_hash: &[u8; 32],
+    space: usize,
+    program_id: &Pubkey,
+) -> Result<u8> {
+    let seeds: &[&[u8]] = &[seed_prefix, day_id.as_bytes(), poi_id_hash.as_ref()];
+    let (pda, bump) = Pubkey::find_program_address(seeds, program_id);
+    require_eq!(pda, target.key(), PackrunError::InvalidEnemyLocation);
+
+    let lamports = Rent::get()?.minimum_balance(space);
+    let account_size = space as u64;
+
+    anchor_lang::system_program::create_account(
+        CpiContext::new(
+            system_program.to_account_info(),
+            anchor_lang::system_program::CreateAccount {
+                from: authority.to_account_info(),
+                to: target.to_account_info(),
+            },
+        ),
+        lamports,
+        account_size,
+        program_id,
+    )?;
+
+    Ok(bump)
+}
+
+#[derive(Accounts)]
+#[instruction(day_id: String, poi_id: String, poi_id_hash: [u8; 32])]
+pub struct InitEnemyDetail<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
     #[account(
-        init,
-        payer = authority,
-        space = ENEMY_LOCATION_SPACE,
-        seeds = [ENEMY_LOCATION_SEED, spec.day_id.as_bytes(), spec.poi_id_hash.as_ref()],
-        bump
+        mut,
+        seeds = [DAILY_DUNGEON_SEED, day_id.as_bytes()],
+        bump = daily_dungeon.bump
     )]
-    pub enemy_location: Option<Account<'info, EnemyLocation>>,
+    pub daily_dungeon: Account<'info, DailyDungeon>,
     #[account(
-        init,
-        payer = authority,
-        space = SHOP_ACCOUNT_SPACE,
-        seeds = [SHOP_SEED, spec.day_id.as_bytes(), spec.poi_id_hash.as_ref()],
-        bump
+        seeds = [LOCATION_SEED, day_id.as_bytes(), poi_id_hash.as_ref()],
+        bump = location_account.bump,
+        constraint = location_account.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.day_id == day_id @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.poi_id_hash == poi_id_hash @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.kind == LocationKind::Enemy @ PackrunError::LocationIsNotEnemy
     )]
-    pub shop_account: Option<Account<'info, ShopAccount>>,
+    pub location_account: Account<'info, LocationAccount>,
+    /// CHECK: initialised manually via CPI to system program in the processor
+    #[account(mut)]
+    pub enemy_location: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(day_id: String, poi_id: String, poi_id_hash: [u8; 32])]
+pub struct InitShopDetail<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
     #[account(
-        init,
-        payer = authority,
-        space = BOSS_LOCATION_SPACE,
-        seeds = [BOSS_LOCATION_SEED, spec.day_id.as_bytes(), spec.poi_id_hash.as_ref()],
-        bump
+        mut,
+        seeds = [DAILY_DUNGEON_SEED, day_id.as_bytes()],
+        bump = daily_dungeon.bump
     )]
-    pub boss_location: Option<Account<'info, BossLocation>>,
+    pub daily_dungeon: Account<'info, DailyDungeon>,
+    #[account(
+        seeds = [LOCATION_SEED, day_id.as_bytes(), poi_id_hash.as_ref()],
+        bump = location_account.bump,
+        constraint = location_account.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.day_id == day_id @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.poi_id_hash == poi_id_hash @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.kind == LocationKind::Shop @ PackrunError::LocationIsNotShop
+    )]
+    pub location_account: Account<'info, LocationAccount>,
+    /// CHECK: initialised manually via CPI to system program in the processor
+    #[account(mut)]
+    pub shop_account: AccountInfo<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(day_id: String, poi_id: String, poi_id_hash: [u8; 32])]
+pub struct InitBossDetail<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [DAILY_DUNGEON_SEED, day_id.as_bytes()],
+        bump = daily_dungeon.bump
+    )]
+    pub daily_dungeon: Account<'info, DailyDungeon>,
+    #[account(
+        seeds = [LOCATION_SEED, day_id.as_bytes(), poi_id_hash.as_ref()],
+        bump = location_account.bump,
+        constraint = location_account.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.day_id == day_id @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.poi_id_hash == poi_id_hash @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.kind == LocationKind::Boss @ PackrunError::LocationIsNotBoss
+    )]
+    pub location_account: Account<'info, LocationAccount>,
+    /// CHECK: initialised manually via CPI to system program in the processor
+    #[account(mut)]
+    pub boss_location: AccountInfo<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -1622,6 +1777,7 @@ fn apply_submit_boss_damage(
     player_run: &mut PlayerRun,
     damage_score: u64,
     now: i64,
+    bump: u8,
 ) -> Result<SubmitBossDamageOutcome> {
     let is_first_participation = contribution.total_damage == 0;
 
@@ -1644,6 +1800,7 @@ fn apply_submit_boss_damage(
         contribution.player = player_run.player;
         contribution.boss_location = shard.boss_location;
         contribution.shard_index = shard.shard_index;
+        contribution.bump = bump;
     }
 
     contribution.total_damage = contribution
@@ -3056,6 +3213,7 @@ mod tests {
             &mut player_run,
             damage_score,
             now,
+            246,
         )
         .unwrap();
 
@@ -3078,7 +3236,7 @@ mod tests {
         let now = 1_500;
 
         // First submission
-        apply_submit_boss_damage(&mut shard, &mut contribution, &mut player_run, 500, now).unwrap();
+        apply_submit_boss_damage(&mut shard, &mut contribution, &mut player_run, 500, now, 246).unwrap();
 
         // Second submission
         let outcome = apply_submit_boss_damage(
@@ -3087,6 +3245,7 @@ mod tests {
             &mut player_run,
             300,
             now + 100,
+            246,
         )
         .unwrap();
 
@@ -3112,6 +3271,7 @@ mod tests {
             &mut player1_run,
             500,
             now,
+            246,
         )
         .unwrap();
         assert_eq!(shard.participant_count, 1);
@@ -3125,6 +3285,7 @@ mod tests {
             &mut player2_run,
             300,
             now,
+            246,
         )
         .unwrap();
         assert_eq!(shard.participant_count, 2);

@@ -1,8 +1,8 @@
 "use client";
 
 import { useAnchorWallet, useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { WalletButton } from "./wallet-button";
 import {
   buildLocationMerkleTree,
   computeBossDamage,
@@ -36,6 +36,9 @@ import {
 import { bossShardIndexForPlayer } from "../../lib/solana/pdas";
 import { simulateBattle, type BattleResult } from "./battle-sim";
 import styles from "./dungeon.module.css";
+
+const ENABLE_MANUAL_POI_INIT =
+  process.env.NEXT_PUBLIC_ENABLE_MANUAL_POI_INIT === "false";
 
 interface PoiDetail {
   readonly spec: DailyLocationSpec;
@@ -736,7 +739,7 @@ export default function DailyDungeonPage() {
               {enterPhase.phase === "submitting" ? "Entering..." : "Enter Dungeon"}
             </button>
           )}
-          <WalletMultiButton className={styles.walletButton} />
+          <WalletButton className={styles.walletButton} />
         </div>
       </header>
 
@@ -940,24 +943,32 @@ function PoiDetailPanel({
       {!detail.loading && !initialized && (
         <div className={styles.detailSection}>
           <p className={styles.hint}>This POI account is not initialized on-chain.</p>
-          {!walletConnected ? (
-            <ConnectWalletAction />
-          ) : !hasPlayerRun ? (
-            <button
-              className={styles.btnPrimary}
-              onClick={onEnterDungeon}
-              disabled={txPending !== null || !dailyDungeon}
-            >
-              {txPending === "enterDungeon" ? "Entering..." : "Enter Dungeon"}
-            </button>
+          {ENABLE_MANUAL_POI_INIT ? (
+            <>
+              {!walletConnected ? (
+                <ConnectWalletAction />
+              ) : !hasPlayerRun ? (
+                <button
+                  className={styles.btnPrimary}
+                  onClick={onEnterDungeon}
+                  disabled={txPending !== null || !dailyDungeon}
+                >
+                  {txPending === "enterDungeon" ? "Entering..." : "Enter Dungeon"}
+                </button>
+              ) : (
+                <button
+                  className={styles.btnInit}
+                  onClick={onInitLocation}
+                  disabled={txPending !== null || initLocationPhase.phase === "submitting" || !dailyDungeon}
+                >
+                  {initLocationPhase.phase === "submitting" ? "Initializing..." : "Initialize Location"}
+                </button>
+              )}
+            </>
           ) : (
-            <button
-              className={styles.btnInit}
-              onClick={onInitLocation}
-              disabled={txPending !== null || initLocationPhase.phase === "submitting" || !dailyDungeon}
-            >
-              {initLocationPhase.phase === "submitting" ? "Initializing..." : "Initialize Location"}
-            </button>
+            <p className={styles.hint} style={{ marginTop: 8 }}>
+              ⏳ Waiting for crank to initialize this location.
+            </p>
           )}
           {initLocationPhase.phase === "error" && <div className={styles.battleError}>❌ {initLocationPhase.message}</div>}
         </div>
@@ -1534,7 +1545,7 @@ function TreasureContent({
 function ConnectWalletAction() {
   return (
     <div className={styles.detailSection}>
-      <WalletMultiButton className={styles.walletButton} />
+      <WalletButton className={styles.walletButton} />
     </div>
   );
 }

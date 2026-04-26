@@ -26,7 +26,7 @@ const { PublicKey, SystemProgram } = solanaWeb3;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const PROGRAM_ID = new PublicKey("2XrgDT4bcQkTTtbFJLapNUSVg1Bwv8jMdHdQ9ZTCMpRA");
+const PROGRAM_ID = new PublicKey("Hj9xusyzfxP8ic9U6rmpGcY4pPGFBJQqm7BUJ4w475jU");
 const MASTER_SEED = "packrun-master";
 
 // Get today's date in YYYY-MM-DD format (UTC)
@@ -84,6 +84,10 @@ async function main() {
 
   // 3. Connect to localnet via Anchor provider
   console.log("[INIT] Connecting to localnet validator...");
+  // Default to localnet RPC if ANCHOR_PROVIDER_URL is not set
+  if (!process.env.ANCHOR_PROVIDER_URL) {
+    process.env.ANCHOR_PROVIDER_URL = "http://127.0.0.1:8899";
+  }
   const provider = AnchorProvider.env();
   const wallet = provider.wallet;
   const program = new Program(idl, provider);
