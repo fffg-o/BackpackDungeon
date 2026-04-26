@@ -208,6 +208,14 @@ export function bossShardPda(dayId: DayId, shardIndex: number): PackrunPdaSeeds 
   return [packrunPdaSeed("bossShard"), encodeUtf8(dayId), u16Seed(shardIndex, "shardIndex")];
 }
 
+export function bossContributionPda(dayId: DayId, player: PackrunPublicKeyInput): PackrunPdaSeeds {
+  return [packrunPdaSeed("bossContribution"), encodeUtf8(dayId), publicKeySeed(player, "player")];
+}
+
+export function dailyRewardClaimPda(dayId: DayId, player: PackrunPublicKeyInput): PackrunPdaSeeds {
+  return [packrunPdaSeed("dailyRewardClaim"), encodeUtf8(dayId), publicKeySeed(player, "player")];
+}
+
 export function bossNftClaimPda(dayId: DayId, player: PackrunPublicKeyInput): PackrunPdaSeeds {
   return [packrunPdaSeed("bossNftClaim"), encodeUtf8(dayId), publicKeySeed(player, "player")];
 }

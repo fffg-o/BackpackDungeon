@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  bossContributionPda,
   bossShardPda,
+  bossNftClaimPda,
   bossLocationPda,
+  dailyRewardClaimPda,
   dailyDungeonPda,
   enemyLocationPda,
   locationPda,
@@ -30,7 +33,8 @@ test("PACKRUN_PDA_SEEDS matches the Rust program seed constants", () => {
     bossShard: "boss_shard",
     bossContribution: "boss_contribution",
     shopItemSlot: "shop_slot",
-    dailyRewardClaim: "daily_claim"
+    dailyRewardClaim: "daily_claim",
+    bossNftClaim: "boss_nft_claim"
   });
 });
 
@@ -91,6 +95,22 @@ test("bossShardPda encodes shardIndex as little-endian u16", () => {
 
   assert.deepEqual(seedStrings(seeds.slice(0, 2)), ["boss_shard", "2026-04-25"]);
   assert.deepEqual([...seeds[2]], [2, 1]);
+});
+
+test("player claim and contribution PDA helpers return the Rust seed order", () => {
+  const player = new Uint8Array(32);
+  player[31] = 9;
+
+  for (const [helper, seed] of [
+    [bossContributionPda, "boss_contribution"],
+    [dailyRewardClaimPda, "daily_claim"],
+    [bossNftClaimPda, "boss_nft_claim"]
+  ] as const) {
+    const seeds = helper("2026-04-25", player);
+
+    assert.deepEqual(seedStrings(seeds.slice(0, 2)), [seed, "2026-04-25"]);
+    assert.deepEqual(seeds[2], player);
+  }
 });
 
 test("playerRunPda rejects non-pubkey byte lengths", () => {

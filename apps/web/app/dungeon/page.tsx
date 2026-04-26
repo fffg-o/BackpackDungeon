@@ -6,13 +6,16 @@ import {
   buildLocationMerkleTree,
   getLocationProof,
   computeEnemyReward,
+  computeEnemyStats,
+  computeBossDamage,
+  getBossShardIndex,
   type DailyLocationSpec,
   type DailyMapInput,
   type EnemyReward,
 } from "@backpack-dungeon/game-core";
-import { LocationKind } from "@backpack-dungeon/shared";
+import { LocationKind, RewardTier } from "@backpack-dungeon/shared";
 import type { LocationKind as LocationKindType } from "@backpack-dungeon/shared";
-import type { EnemyConfig } from "@backpack-dungeon/shared";
+import type { EnemyConfig, BossConfig } from "@backpack-dungeon/shared";
 import { mockCnftAdapter } from "@backpack-dungeon/cnft-adapter";
 import type { MintResult } from "@backpack-dungeon/cnft-adapter";
 import {
@@ -41,6 +44,8 @@ interface OnChainState {
   readonly cooldownEnd?: number;
   readonly stock?: Record<number, { readonly available: number; readonly price: number }>;
   readonly bossShards?: readonly { readonly index: number; readonly totalDamage: number; readonly participantCount: number }[];
+  readonly bossDefeated?: boolean;
+  readonly rewardClaimed?: boolean;
 }
 
 type BattlePhase =
@@ -49,6 +54,26 @@ type BattlePhase =
   | { readonly phase: "result"; readonly result: BattleResult }
   | { readonly phase: "submitting" }
   | { readonly phase: "success"; readonly reward: EnemyReward; readonly mintResult: MintResult }
+  | { readonly phase: "error"; readonly message: string };
+
+type ShopBuyPhase =
+  | { readonly phase: "idle" }
+  | { readonly phase: "buying"; readonly slotIndex: number }
+  | { readonly phase: "bought"; readonly slotIndex: number; readonly mintResult: MintResult }
+  | { readonly phase: "error"; readonly message: string };
+
+type BossBattlePhase =
+  | { readonly phase: "idle" }
+  | { readonly phase: "simulating" }
+  | { readonly phase: "result"; readonly result: BattleResult; readonly damage: number }
+  | { readonly phase: "submitting" }
+  | { readonly phase: "success"; readonly damage: number; readonly mintResult: MintResult }
+  | { readonly phase: "error"; readonly message: string };
+
+type TreasureClaimPhase =
+  | { readonly phase: "idle" }
+  | { readonly phase: "claiming" }
+  | { readonly phase: "claimed"; readonly mintResult: MintResult }
   | { readonly phase: "error"; readonly message: string };
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -123,6 +148,7 @@ function mockOnChainState(spec: DailyLocationSpec): OnChainState | null {
         { index: 0, totalDamage: 12500, participantCount: 3 },
         { index: 1, totalDamage: 8700, participantCount: 2 },
       ],
+      bossDefeated: false,
     };
   }
 
@@ -166,7 +192,11 @@ export default function DailyDungeonPage() {
   const [selectedPoi, setSelectedPoi] = useState<PoiDetail | null>(null);
   const [hoveredPoi, setHoveredPoi] = useState<DailyLocationSpec | null>(null);
   const [battlePhase, setBattlePhase] = useState<BattlePhase>({ phase: "idle" });
+  const [shopBuyPhase, setShopBuyPhase] = useState<ShopBuyPhase>({ phase: "idle" });
+  const [bossBattlePhase, setBossBattlePhase] = useState<BossBattlePhase>({ phase: "idle" });
+  const [treasureClaimPhase, setTreasureClaimPhase] = useState<TreasureClaimPhase>({ phase: "idle" });
   const [localClearCounts, setLocalClearCounts] = useState<Record<string, number>>({});
+  const [playerPoints, setPlayerPoints] = useState(500);
 
   // Cooldown ticker
   const [, setTick] = useState(0);
@@ -209,6 +239,9 @@ export default function DailyDungeonPage() {
       const onChain = mockOnChainState(spec);
       setSelectedPoi({ spec, onChain, merkleProof: proof });
       setBattlePhase({ phase: "idle" });
+      setShopBuyPhase({ phase: "idle" });
+      setBossBattlePhase({ phase: "idle" });
+      setTreasureClaimPhase({ phase: "idle" });
     },
     [map]
   );
@@ -224,6 +257,8 @@ export default function DailyDungeonPage() {
         `Proof length: ${selectedPoi.merkleProof.length} steps`
     );
   }, [selectedPoi, merkleTree]);
+
+  // ── Enemy Battle Flow ─────────────────────────────────────────────────────
 
   const handleStartBattle = useCallback(() => {
     if (!selectedPoi?.spec.enemy || !selectedPoi.onChain) return;
@@ -269,7 +304,7 @@ export default function DailyDungeonPage() {
         }
       );
 
-      // ── Step 3: Mint cNFT for low-value loot ──
+      // ── Step 3: Mint cNFT for loot ──
       const mintResult = await mockCnftAdapter.mintEnemyLootCnft({
         name: `${enemy.name} Loot`,
         symbol: "LOOT",
@@ -286,7 +321,10 @@ export default function DailyDungeonPage() {
         ],
       });
 
-      // ── Step 4: Update local state ──
+      // ── Step 4: Add points to player ──
+      setPlayerPoints((prev) => prev + reward.amount);
+
+      // ── Step 5: Update local state ──
       setLocalClearCounts((prev) => ({
         ...prev,
         [spec.id]: clearCount,
@@ -305,8 +343,170 @@ export default function DailyDungeonPage() {
     setBattlePhase({ phase: "idle" });
   }, []);
 
-  const connectWallet = useCallback(() => {
+  // ── Shop Buy Flow ─────────────────────────────────────────────────────────
+
+  const handleBuyItem = useCallback(async (slotIndex: number) => {
+    if (!selectedPoi?.spec.shop || !selectedPoi.onChain?.stock) return;
+    const slot = selectedPoi.spec.shop.itemSlots[slotIndex];
+    const stockInfo = selectedPoi.onChain.stock[slotIndex];
+    if (!stockInfo || stockInfo.available <= 0) return;
+    if (playerPoints < stockInfo.price) {
+      setShopBuyPhase({ phase: "error", message: "Insufficient points!" });
+      return;
+    }
+
+    setShopBuyPhase({ phase: "buying", slotIndex });
+
+    try {
+      await new Promise((r) => setTimeout(r, 500));
+
+      // Deduct points
+      setPlayerPoints((prev) => prev - stockInfo.price);
+
+      // Mint cNFT for purchased item (use EnemyLootMetadata-compatible attributes)
+      const mintResult = await mockCnftAdapter.mintEnemyLootCnft({
+        name: `${slot.itemId}`,
+        symbol: "ITEM",
+        description: `Purchased from shop: ${slot.itemId}`,
+        image: `https://backpack-dungeon.example/items/${slot.itemId}.png`,
+        attributes: [
+          { trait_type: "category", value: "enemy_loot" },
+          { trait_type: "enemy_id", value: "shop" },
+          { trait_type: "reward_tier", value: slot.rewardTier },
+          { trait_type: "day_id", value: map.dayId },
+          { trait_type: "item_id", value: slot.itemId },
+          { trait_type: "price", value: stockInfo.price },
+        ],
+      });
+
+      setShopBuyPhase({ phase: "bought", slotIndex, mintResult });
+    } catch (err) {
+      setShopBuyPhase({
+        phase: "error",
+        message: err instanceof Error ? err.message : "Purchase failed",
+      });
+    }
+  }, [selectedPoi, playerPoints, map.dayId]);
+
+  // ── Boss Battle Flow ──────────────────────────────────────────────────────
+
+  const handleStartBossBattle = useCallback(() => {
+    if (!selectedPoi?.spec.boss || !selectedPoi.onChain) return;
+    setBossBattlePhase({ phase: "simulating" });
+
+    // Simulate boss battle using enemy battle sim with boss config
+    const boss = selectedPoi.spec.boss;
+    const bossAsEnemy: EnemyConfig = {
+      id: boss.id,
+      name: boss.name,
+      level: boss.level,
+      maxHealth: boss.maxHealth,
+      attack: boss.attack,
+      rewardTier: boss.rewardTier,
+    };
+
+    // Small delay for UX
+    setTimeout(() => {
+      const result = simulateBattle(bossAsEnemy, 0);
+      const damage = computeBossDamage({
+        baseDamage: result.damageTaken > 0 ? Math.max(10, 100 - result.damageTaken) : 150,
+        blockedDamage: 0,
+        bonusDamage: result.flawless ? 50 : 0,
+        multiplierBps: 10_000,
+      });
+      setBossBattlePhase({ phase: "result", result, damage });
+    }, 400);
+  }, [selectedPoi]);
+
+  const handleSubmitBossDamage = useCallback(async () => {
+    const bossBattle = bossBattlePhase;
+    if (bossBattle.phase !== "result") return;
+
+    setBossBattlePhase({ phase: "submitting" });
+
+    try {
+      await new Promise((r) => setTimeout(r, 600));
+
+      const mintResult = await mockCnftAdapter.mintBossParticipationCnft({
+        name: "Boss Participation",
+        symbol: "BOSS",
+        description: `Dealt ${bossBattle.damage} damage to boss`,
+        image: "https://backpack-dungeon.example/boss/participation.png",
+        attributes: [
+          { trait_type: "category", value: "boss_participation" },
+          { trait_type: "boss_id", value: selectedPoi?.spec.boss?.id ?? "unknown" },
+          { trait_type: "day_id", value: map.dayId },
+          { trait_type: "damage", value: bossBattle.damage },
+        ],
+      });
+
+      setPlayerPoints((prev) => prev + Math.floor(bossBattle.damage / 2));
+      setBossBattlePhase({ phase: "success", damage: bossBattle.damage, mintResult });
+    } catch (err) {
+      setBossBattlePhase({
+        phase: "error",
+        message: err instanceof Error ? err.message : "Failed to submit boss damage",
+      });
+    }
+  }, [bossBattlePhase, selectedPoi, map.dayId]);
+
+  // ── Treasure Claim Flow ───────────────────────────────────────────────────
+
+  const handleClaimTreasure = useCallback(async () => {
+    if (!selectedPoi?.spec) return;
+    setTreasureClaimPhase({ phase: "claiming" });
+
+    try {
+      await new Promise((r) => setTimeout(r, 600));
+
+      const tier = selectedPoi.spec.rewardTier ?? RewardTier.Common;
+      const mintResult = await mockCnftAdapter.mintDailyRewardNft({
+        name: `${tier} Treasure`,
+        symbol: "TREASURE",
+        description: `Treasure reward from daily dungeon`,
+        image: `https://backpack-dungeon.example/treasure/${tier}.png`,
+        attributes: [
+          { trait_type: "category", value: "daily_reward" },
+          { trait_type: "day_id", value: map.dayId },
+          { trait_type: "tier", value: tier },
+        ],
+      });
+
+      const points = { Common: 50, Uncommon: 100, Rare: 200, Epic: 500, Legendary: 1000 }[tier] ?? 50;
+      setPlayerPoints((prev) => prev + points);
+      setTreasureClaimPhase({ phase: "claimed", mintResult });
+    } catch (err) {
+      setTreasureClaimPhase({
+        phase: "error",
+        message: err instanceof Error ? err.message : "Failed to claim treasure",
+      });
+    }
+  }, [selectedPoi, map.dayId]);
+
+  // ── Wallet Connection ─────────────────────────────────────────────────────
+
+  const connectWallet = useCallback(async () => {
     setWallet({ status: "connecting" });
+
+    // Try real wallet-standard (window.solana / window.phantom)
+    const solana = (window as unknown as Record<string, unknown>).solana as
+      | { isPhantom?: boolean; connect: () => Promise<{ publicKey: { toString: () => string } }>; on?: (event: string, handler: () => void) => void }
+      | undefined;
+
+    if (solana?.connect) {
+      try {
+        const response = await solana.connect();
+        setWallet({
+          status: "connected",
+          address: response.publicKey.toString(),
+        });
+        return;
+      } catch {
+        // User rejected or wallet error, fallback to mock
+      }
+    }
+
+    // Fallback: mock wallet
     setTimeout(() => {
       setWallet({
         status: "connected",
@@ -319,6 +519,9 @@ export default function DailyDungeonPage() {
     setWallet({ status: "disconnected" });
     setSelectedPoi(null);
     setBattlePhase({ phase: "idle" });
+    setShopBuyPhase({ phase: "idle" });
+    setBossBattlePhase({ phase: "idle" });
+    setTreasureClaimPhase({ phase: "idle" });
   }, []);
 
   return (
@@ -331,6 +534,9 @@ export default function DailyDungeonPage() {
         </div>
         <div className={styles.headerRight}>
           <div className={styles.stats}>
+            <span title="Player Points" className={styles.stat}>
+              🪙 {playerPoints}
+            </span>
             <span title="Seed hash" className={styles.stat}>
               🌱 {map.seedHash.slice(0, 12)}...
             </span>
@@ -420,6 +626,14 @@ export default function DailyDungeonPage() {
               onClearEnemy={handleClearEnemy}
               onRetry={handleRetry}
               localClearCount={selectedPoi ? (localClearCounts[selectedPoi.spec.id] ?? selectedPoi.onChain?.clearCount ?? 0) : 0}
+              shopBuyPhase={shopBuyPhase}
+              onBuyItem={handleBuyItem}
+              playerPoints={playerPoints}
+              bossBattlePhase={bossBattlePhase}
+              onStartBossBattle={handleStartBossBattle}
+              onSubmitBossDamage={handleSubmitBossDamage}
+              treasureClaimPhase={treasureClaimPhase}
+              onClaimTreasure={handleClaimTreasure}
             />
           ) : (
             <div className={styles.emptyState}>
@@ -445,6 +659,14 @@ function PoiDetailPanel({
   onClearEnemy,
   onRetry,
   localClearCount,
+  shopBuyPhase,
+  onBuyItem,
+  playerPoints,
+  bossBattlePhase,
+  onStartBossBattle,
+  onSubmitBossDamage,
+  treasureClaimPhase,
+  onClaimTreasure,
 }: {
   readonly detail: PoiDetail;
   readonly merkleRoot: string;
@@ -455,6 +677,14 @@ function PoiDetailPanel({
   readonly onClearEnemy: () => void;
   readonly onRetry: () => void;
   readonly localClearCount: number;
+  readonly shopBuyPhase: ShopBuyPhase;
+  readonly onBuyItem: (slotIndex: number) => void;
+  readonly playerPoints: number;
+  readonly bossBattlePhase: BossBattlePhase;
+  readonly onStartBossBattle: () => void;
+  readonly onSubmitBossDamage: () => void;
+  readonly treasureClaimPhase: TreasureClaimPhase;
+  readonly onClaimTreasure: () => void;
 }) {
   const { spec, onChain, merkleProof } = detail;
   const onCooldown = isOnCooldown(onChain);
@@ -497,102 +727,39 @@ function PoiDetailPanel({
         />
       )}
 
-      {/* Shop details */}
+      {/* Shop details with buy functionality */}
       {spec.kind === LocationKind.Shop && spec.shop && (
-        <div className={styles.detailSection}>
-          <h3 className={styles.sectionTitle}>🏪 Shop</h3>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Keeper</span>
-            <span className={styles.metaValue}>{spec.shop.keeperName ?? "Unknown"}</span>
-          </div>
-          <h3 className={styles.sectionTitle}>Items</h3>
-          {spec.shop.itemSlots.map((slot, i) => (
-            <div key={slot.slotId} className={styles.shopSlot}>
-              <div className={styles.shopSlotHeader}>
-                <span className={styles.shopSlotName}>{slot.itemId}</span>
-                <span className={styles.shopSlotTier} style={{ color: rewardTierColor(slot.rewardTier) }}>
-                  {slot.rewardTier}
-                </span>
-              </div>
-              <div className={styles.detailMeta}>
-                <span className={styles.metaLabel}>Base Price</span>
-                <span className={styles.metaValue}>{slot.price} 🪙</span>
-              </div>
-              <div className={styles.detailMeta}>
-                <span className={styles.metaLabel}>Base Stock</span>
-                <span className={styles.metaValue}>{slot.stock}</span>
-              </div>
-              {onChain?.stock?.[i] && (
-                <>
-                  <div className={styles.detailMeta}>
-                    <span className={styles.metaLabel}>Available</span>
-                    <span className={styles.metaValue}>{onChain.stock[i].available}</span>
-                  </div>
-                  <div className={styles.detailMeta}>
-                    <span className={styles.metaLabel}>Current Price</span>
-                    <span className={styles.metaValue}>{onChain.stock[i].price} 🪙</span>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
+        <ShopContent
+          shop={spec.shop}
+          onChain={onChain}
+          shopBuyPhase={shopBuyPhase}
+          onBuyItem={onBuyItem}
+          playerPoints={playerPoints}
+          walletConnected={walletConnected}
+        />
       )}
 
-      {/* Boss details */}
+      {/* Boss details with battle */}
       {spec.kind === LocationKind.Boss && spec.boss && (
-        <div className={styles.detailSection}>
-          <h3 className={styles.sectionTitle}>👹 Boss</h3>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Name</span>
-            <span className={styles.metaValue}>{spec.boss.name}</span>
-          </div>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Level</span>
-            <span className={styles.metaValue}>{spec.boss.level}</span>
-          </div>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>HP</span>
-            <span className={styles.metaValue}>{spec.boss.maxHealth}</span>
-          </div>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Attack</span>
-            <span className={styles.metaValue}>{spec.boss.attack}</span>
-          </div>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Reward Tier</span>
-            <span className={styles.metaValue} style={{ color: rewardTierColor(spec.boss.rewardTier) }}>
-              {spec.boss.rewardTier}
-            </span>
-          </div>
-
-          {onChain?.bossShards && (
-            <>
-              <h3 className={styles.sectionTitle}>💥 Shard Progress</h3>
-              {onChain.bossShards.map((shard) => (
-                <div key={shard.index} className={styles.shardRow}>
-                  <span className={styles.shardLabel}>Shard #{shard.index}</span>
-                  <span className={styles.shardValue}>
-                    {shard.totalDamage.toLocaleString()} dmg · {shard.participantCount} players
-                  </span>
-                </div>
-              ))}
-            </>
-          )}
-        </div>
+        <BossContent
+          boss={spec.boss}
+          onChain={onChain}
+          bossBattlePhase={bossBattlePhase}
+          onStartBossBattle={onStartBossBattle}
+          onSubmitBossDamage={onSubmitBossDamage}
+          walletConnected={walletConnected}
+        />
       )}
 
-      {/* Treasure details */}
+      {/* Treasure details with claim */}
       {spec.kind === LocationKind.Treasure && (
-        <div className={styles.detailSection}>
-          <h3 className={styles.sectionTitle}>💎 Treasure</h3>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Reward Tier</span>
-            <span className={styles.metaValue} style={{ color: rewardTierColor(spec.rewardTier ?? "Common") }}>
-              {spec.rewardTier ?? "Common"}
-            </span>
-          </div>
-        </div>
+        <TreasureContent
+          spec={spec}
+          onChain={onChain}
+          treasureClaimPhase={treasureClaimPhase}
+          onClaimTreasure={onClaimTreasure}
+          walletConnected={walletConnected}
+        />
       )}
 
       {/* Merkle proof info */}
@@ -610,7 +777,7 @@ function PoiDetailPanel({
         </div>
       </div>
 
-      {/* Init location button (only when not enemy — enemy uses battle flow) */}
+      {/* Init location button */}
       {spec.kind !== LocationKind.Enemy && !onChain?.initialized && walletConnected && (
         <button className={styles.btnInit} onClick={onInitLocation}>
           🚀 Init Location from Merkle Proof
@@ -626,7 +793,7 @@ function PoiDetailPanel({
   );
 }
 
-// ── Enemy Content (battle flow) ──────────────────────────────────────────────
+// ── Enemy Content ────────────────────────────────────────────────────────────
 
 function EnemyContent({
   enemy,
@@ -639,7 +806,7 @@ function EnemyContent({
   cooldownSecs,
   localClearCount,
 }: {
-  readonly enemy: EnemyConfig;
+  readonly enemy: NonNullable<DailyLocationSpec["enemy"]>;
   readonly onChain: OnChainState | null;
   readonly battlePhase: BattlePhase;
   readonly onStartBattle: () => void;
@@ -651,259 +818,387 @@ function EnemyContent({
 }) {
   return (
     <div className={styles.detailSection}>
-      <h3 className={styles.sectionTitle}>⚔️ Enemy</h3>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Name</span>
-        <span className={styles.metaValue}>{enemy.name}</span>
-      </div>
+      <h3 className={styles.sectionTitle}>⚔️ {enemy.name}</h3>
       <div className={styles.detailMeta}>
         <span className={styles.metaLabel}>Level</span>
         <span className={styles.metaValue}>{enemy.level}</span>
       </div>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Base HP</span>
+        <span className={styles.metaLabel}>HP</span>
         <span className={styles.metaValue}>{enemy.maxHealth}</span>
       </div>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Base Attack</span>
+        <span className={styles.metaLabel}>Attack</span>
         <span className={styles.metaValue}>{enemy.attack}</span>
       </div>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Reward Tier</span>
-        <span className={styles.metaValue} style={{ color: rewardTierColor(enemy.rewardTier) }}>
-          {enemy.rewardTier}
-        </span>
+        <span className={styles.metaLabel}>Clear Count</span>
+        <span className={styles.metaValue}>{localClearCount}</span>
       </div>
-
-      {/* On-chain state */}
-      {onChain && (
-        <>
-          <h3 className={styles.sectionTitle}>📊 On-Chain State</h3>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Clear Count</span>
-            <span className={styles.metaValue}>{localClearCount}</span>
-          </div>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Difficulty</span>
-            <span className={styles.metaValue}>{onChain.difficultyLevel ?? enemy.level}</span>
-          </div>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Cooldown</span>
-            <span className={styles.metaValue} style={{ color: onCooldown ? "#e74c3c" : "#2ecc71" }}>
-              {onCooldown ? `⏳ ${formatCooldown(cooldownSecs)}` : "✅ Ready"}
-            </span>
-          </div>
-        </>
+      {onChain?.difficultyLevel !== undefined && (
+        <div className={styles.detailMeta}>
+          <span className={styles.metaLabel}>Difficulty</span>
+          <span className={styles.metaValue}>{onChain.difficultyLevel}</span>
+        </div>
       )}
 
-      {/* ── Battle Flow ── */}
-      <div className={styles.battleSection}>
-        {battlePhase.phase === "idle" && onChain?.initialized && !onCooldown && (
-          <button className={styles.btnBattle} onClick={onStartBattle}>
-            ⚔️ Start Battle
-          </button>
-        )}
-
-        {battlePhase.phase === "idle" && onCooldown && (
-          <div className={styles.cooldownNotice}>
-            ⏳ Enemy on cooldown — {formatCooldown(cooldownSecs)} remaining
+      {onCooldown ? (
+        <div className={styles.cooldown}>
+          ⏳ Cooldown: {formatCooldown(cooldownSecs)}
+        </div>
+      ) : battlePhase.phase === "idle" ? (
+        <button className={styles.btnClear} onClick={onStartBattle} style={{ marginTop: 8 }}>
+          ⚔️ Start Battle
+        </button>
+      ) : battlePhase.phase === "simulating" ? (
+        <div className={styles.battleSimulating}>
+          <div className={styles.spinner} />
+          <span>Simulating battle...</span>
+        </div>
+      ) : battlePhase.phase === "result" ? (
+        <div className={styles.battleResult}>
+          <div className={styles.detailMeta}>
+            <span className={styles.metaLabel}>Outcome</span>
+            <span className={styles.metaValue}>
+              {battlePhase.result.won ? "✅ Victory" : "❌ Defeated"}
+            </span>
           </div>
-        )}
-
-        {battlePhase.phase === "simulating" && (
-          <div className={styles.battleSimulating}>
-            <div className={styles.spinner} />
-            <span>Simulating battle...</span>
+          <div className={styles.detailMeta}>
+            <span className={styles.metaLabel}>Turns</span>
+            <span className={styles.metaValue}>{battlePhase.result.turnsTaken}</span>
           </div>
-        )}
-
-        {battlePhase.phase === "result" && (
-          <BattleResultView
-            result={battlePhase.result}
-            onClear={onClearEnemy}
-            onRetry={onRetry}
-          />
-        )}
-
-        {battlePhase.phase === "submitting" && (
-          <div className={styles.battleSimulating}>
-            <div className={styles.spinner} />
-            <span>Submitting clear_enemy to chain...</span>
+          <div className={styles.detailMeta}>
+            <span className={styles.metaLabel}>Damage Taken</span>
+            <span className={styles.metaValue}>{battlePhase.result.damageTaken}</span>
           </div>
-        )}
-
-        {battlePhase.phase === "success" && (
-          <ClearSuccessView
-            reward={battlePhase.reward}
-            mintResult={battlePhase.mintResult}
-            onRetry={onRetry}
-          />
-        )}
-
-        {battlePhase.phase === "error" && (
-          <div className={styles.battleError}>
-            <span>❌ {battlePhase.message}</span>
-            <button className={styles.btnSecondary} onClick={onRetry}>
-              Dismiss
+          {battlePhase.result.won ? (
+            <button className={styles.btnClear} onClick={onClearEnemy} style={{ marginTop: 8 }}>
+              📤 Submit Clear
             </button>
+          ) : (
+            <button className={styles.btnSecondary} onClick={onRetry} style={{ marginTop: 8 }}>
+              🔄 Retry
+            </button>
+          )}
+        </div>
+      ) : battlePhase.phase === "submitting" ? (
+        <div className={styles.battleSimulating}>
+          <div className={styles.spinner} />
+          <span>Submitting clear...</span>
+        </div>
+      ) : battlePhase.phase === "success" ? (
+        <div className={styles.initialized}>
+          ✅ Cleared! +{battlePhase.reward.amount} 🪙
+          <div className={styles.detailMeta} style={{ marginTop: 4 }}>
+            <span className={styles.metaLabel}>Tier</span>
+            <span className={styles.metaValue} style={{ color: rewardTierColor(battlePhase.reward.tier) }}>
+              {battlePhase.reward.tier}
+            </span>
           </div>
-        )}
-
-        {!onChain?.initialized && (
-          <p className={styles.hint}>Initialize this location on-chain to battle</p>
-        )}
-      </div>
+          <div className={styles.detailMeta}>
+            <span className={styles.metaLabel}>cNFT</span>
+            <span className={styles.metaValue}>{battlePhase.mintResult.log}</span>
+          </div>
+        </div>
+      ) : battlePhase.phase === "error" ? (
+        <div className={styles.battleError} style={{ marginTop: 6 }}>
+          ❌ {battlePhase.message}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-// ── Battle Result View ───────────────────────────────────────────────────────
+// ── Shop Content ─────────────────────────────────────────────────────────────
 
-function BattleResultView({
-  result,
-  onClear,
-  onRetry,
+function ShopContent({
+  shop,
+  onChain,
+  shopBuyPhase,
+  onBuyItem,
+  playerPoints,
+  walletConnected,
 }: {
-  readonly result: BattleResult;
-  readonly onClear: () => void;
-  readonly onRetry: () => void;
+  readonly shop: NonNullable<DailyLocationSpec["shop"]>;
+  readonly onChain: OnChainState | null;
+  readonly shopBuyPhase: ShopBuyPhase;
+  readonly onBuyItem: (slotIndex: number) => void;
+  readonly playerPoints: number;
+  readonly walletConnected: boolean;
 }) {
-  const [showLog, setShowLog] = useState(false);
-
   return (
-    <div className={styles.battleResult}>
-      <h3 className={styles.sectionTitle}>
-        {result.won ? "🎉 Victory!" : "💀 Defeated"}
-      </h3>
+    <div className={styles.detailSection}>
+      <h3 className={styles.sectionTitle}>🏪 Shop</h3>
+      <div className={styles.detailMeta}>
+        <span className={styles.metaLabel}>Keeper</span>
+        <span className={styles.metaValue}>{shop.keeperName ?? "Unknown"}</span>
+      </div>
+      <div className={styles.detailMeta}>
+        <span className={styles.metaLabel}>Your Points</span>
+        <span className={styles.metaValue}>{playerPoints} 🪙</span>
+      </div>
+      <h3 className={styles.sectionTitle}>Items</h3>
+      {shop.itemSlots.map((slot, i) => {
+        const stockInfo = onChain?.stock?.[i];
+        const isBuying = shopBuyPhase.phase === "buying" && shopBuyPhase.slotIndex === i;
+        const isBought = shopBuyPhase.phase === "bought" && shopBuyPhase.slotIndex === i;
+        const canAfford = stockInfo ? playerPoints >= stockInfo.price : false;
+        const inStock = stockInfo ? stockInfo.available > 0 : true;
 
-      <div className={styles.battleStats}>
-        <div className={styles.battleStat}>
-          <span className={styles.metaLabel}>Turns</span>
-          <span className={styles.metaValue}>{result.turnsTaken}</span>
-        </div>
-        <div className={styles.battleStat}>
-          <span className={styles.metaLabel}>Damage Taken</span>
-          <span className={styles.metaValue}>{result.damageTaken}</span>
-        </div>
-        <div className={styles.battleStat}>
-          <span className={styles.metaLabel}>Flawless</span>
-          <span className={styles.metaValue}>{result.flawless ? "✅" : "❌"}</span>
-        </div>
+        return (
+          <div key={slot.slotId} className={styles.shopSlot}>
+            <div className={styles.shopSlotHeader}>
+              <span className={styles.shopSlotName}>{slot.itemId}</span>
+              <span className={styles.shopSlotTier} style={{ color: rewardTierColor(slot.rewardTier) }}>
+                {slot.rewardTier}
+              </span>
+            </div>
+            <div className={styles.detailMeta}>
+              <span className={styles.metaLabel}>Base Price</span>
+              <span className={styles.metaValue}>{slot.price} 🪙</span>
+            </div>
+            {stockInfo && (
+              <>
+                <div className={styles.detailMeta}>
+                  <span className={styles.metaLabel}>Available</span>
+                  <span className={styles.metaValue}>{stockInfo.available}</span>
+                </div>
+                <div className={styles.detailMeta}>
+                  <span className={styles.metaLabel}>Current Price</span>
+                  <span className={styles.metaValue}>{stockInfo.price} 🪙</span>
+                </div>
+              </>
+            )}
+            {isBought ? (
+              <div className={styles.initialized}>✅ Purchased!</div>
+            ) : isBuying ? (
+              <div className={styles.battleSimulating}>
+                <div className={styles.spinner} />
+                <span>Buying...</span>
+              </div>
+            ) : (
+              walletConnected && inStock && (
+                <button
+                  className={styles.btnClear}
+                  onClick={() => onBuyItem(i)}
+                  disabled={!canAfford}
+                  style={{ marginTop: 6, opacity: canAfford ? 1 : 0.5 }}
+                >
+                  {canAfford ? `🛒 Buy (${stockInfo?.price ?? slot.price} 🪙)` : "❌ Insufficient Points"}
+                </button>
+              )
+            )}
+            {shopBuyPhase.phase === "error" && (
+              <div className={styles.battleError} style={{ marginTop: 6 }}>
+                ❌ {shopBuyPhase.message}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Boss Content ─────────────────────────────────────────────────────────────
+
+function BossContent({
+  boss,
+  onChain,
+  bossBattlePhase,
+  onStartBossBattle,
+  onSubmitBossDamage,
+  walletConnected,
+}: {
+  readonly boss: NonNullable<DailyLocationSpec["boss"]>;
+  readonly onChain: OnChainState | null;
+  readonly bossBattlePhase: BossBattlePhase;
+  readonly onStartBossBattle: () => void;
+  readonly onSubmitBossDamage: () => void;
+  readonly walletConnected: boolean;
+}) {
+  return (
+    <div className={styles.detailSection}>
+      <h3 className={styles.sectionTitle}>👹 Boss: {boss.name}</h3>
+      <div className={styles.detailMeta}>
+        <span className={styles.metaLabel}>Level</span>
+        <span className={styles.metaValue}>{boss.level}</span>
+      </div>
+      <div className={styles.detailMeta}>
+        <span className={styles.metaLabel}>HP</span>
+        <span className={styles.metaValue}>{boss.maxHealth}</span>
+      </div>
+      <div className={styles.detailMeta}>
+        <span className={styles.metaLabel}>Attack</span>
+        <span className={styles.metaValue}>{boss.attack}</span>
+      </div>
+      <div className={styles.detailMeta}>
+        <span className={styles.metaLabel}>Reward Tier</span>
+        <span className={styles.metaValue} style={{ color: rewardTierColor(boss.rewardTier) }}>
+          {boss.rewardTier}
+        </span>
       </div>
 
-      {/* Battle log toggle */}
-      <button
-        className={styles.btnLogToggle}
-        onClick={() => setShowLog((v) => !v)}
-      >
-        {showLog ? "📜 Hide Battle Log" : "📜 Show Battle Log"}
-      </button>
-
-      {showLog && (
-        <div className={styles.battleLog}>
-          {result.log.map((entry, i) => (
-            <div key={i} className={styles.logEntry}>
-              <span className={styles.logTurn}>T{entry.turn}</span>
-              <span className={entry.attacker === "player" ? styles.logPlayer : styles.logEnemy}>
-                {entry.attacker === "player" ? "⚔️ You" : "👹 Enemy"}
-              </span>
-              <span className={styles.logDamage}>
-                {entry.damage > 0 ? `-${entry.damage} HP` : "miss"}
-              </span>
-              <span className={styles.logHp}>
-                (P:{entry.playerHpAfter} E:{entry.enemyHpAfter})
+      {/* Shard progress */}
+      {onChain?.bossShards && (
+        <div className={styles.bossShards}>
+          <h4 className={styles.sectionTitle}>Shard Progress</h4>
+          {onChain.bossShards.map((shard) => (
+            <div key={shard.index} className={styles.detailMeta}>
+              <span className={styles.metaLabel}>Shard #{shard.index}</span>
+              <span className={styles.metaValue}>
+                {shard.totalDamage} dmg ({shard.participantCount} players)
               </span>
             </div>
           ))}
         </div>
       )}
 
-      <div className={styles.battleActions}>
-        {result.won ? (
-          <button className={styles.btnClear} onClick={onClear}>
-            🏆 Submit Clear (clear_enemy)
-          </button>
-        ) : (
-          <p className={styles.defeatHint}>You were defeated. Try again!</p>
-        )}
-        <button className={styles.btnSecondary} onClick={onRetry}>
-          🔄 Retry Battle
+      {/* Boss battle UI */}
+      {bossBattlePhase.phase === "idle" && walletConnected && (
+        <button className={styles.btnClear} onClick={onStartBossBattle} style={{ marginTop: 8 }}>
+          ⚔️ Start Boss Battle
         </button>
-      </div>
+      )}
+
+      {bossBattlePhase.phase === "simulating" && (
+        <div className={styles.battleSimulating}>
+          <div className={styles.spinner} />
+          <span>Simulating boss battle...</span>
+        </div>
+      )}
+
+      {bossBattlePhase.phase === "result" && (
+        <div className={styles.battleResult}>
+          <div className={styles.detailMeta}>
+            <span className={styles.metaLabel}>Outcome</span>
+            <span className={styles.metaValue}>
+              {bossBattlePhase.result.won ? "✅ Victory" : "❌ Defeated"}
+            </span>
+          </div>
+          <div className={styles.detailMeta}>
+            <span className={styles.metaLabel}>Damage Dealt</span>
+            <span className={styles.metaValue}>{bossBattlePhase.damage}</span>
+          </div>
+          <div className={styles.detailMeta}>
+            <span className={styles.metaLabel}>Turns</span>
+            <span className={styles.metaValue}>{bossBattlePhase.result.turnsTaken}</span>
+          </div>
+          <div className={styles.detailMeta}>
+            <span className={styles.metaLabel}>Damage Taken</span>
+            <span className={styles.metaValue}>{bossBattlePhase.result.damageTaken}</span>
+          </div>
+          <div className={styles.buttonRow} style={{ marginTop: 8 }}>
+            <button className={styles.btnClear} onClick={onSubmitBossDamage}>
+              📤 Submit Damage
+            </button>
+            <button className={styles.btnSecondary} onClick={onStartBossBattle}>
+              🔄 Retry
+            </button>
+          </div>
+        </div>
+      )}
+
+      {bossBattlePhase.phase === "submitting" && (
+        <div className={styles.battleSimulating}>
+          <div className={styles.spinner} />
+          <span>Submitting boss damage...</span>
+        </div>
+      )}
+
+      {bossBattlePhase.phase === "success" && (
+        <div className={styles.initialized}>
+          ✅ Submitted {bossBattlePhase.damage} damage!
+          <div className={styles.detailMeta} style={{ marginTop: 4 }}>
+            <span className={styles.metaLabel}>cNFT</span>
+            <span className={styles.metaValue}>{bossBattlePhase.mintResult.log}</span>
+          </div>
+        </div>
+      )}
+
+      {bossBattlePhase.phase === "error" && (
+        <div className={styles.battleError} style={{ marginTop: 6 }}>
+          ❌ {bossBattlePhase.message}
+        </div>
+      )}
+
+      {!walletConnected && (
+        <p className={styles.hint}>Connect wallet to fight the boss</p>
+      )}
     </div>
   );
 }
 
-// ── Clear Success View ───────────────────────────────────────────────────────
+// ── Treasure Content ──────────────────────────────────────────────────────────
 
-function ClearSuccessView({
-  reward,
-  mintResult,
-  onRetry,
+function TreasureContent({
+  spec,
+  onChain,
+  treasureClaimPhase,
+  onClaimTreasure,
+  walletConnected,
 }: {
-  readonly reward: EnemyReward;
-  readonly mintResult: MintResult;
-  readonly onRetry: () => void;
+  readonly spec: DailyLocationSpec;
+  readonly onChain: OnChainState | null;
+  readonly treasureClaimPhase: TreasureClaimPhase;
+  readonly onClaimTreasure: () => void;
+  readonly walletConnected: boolean;
 }) {
+  const tier = spec.rewardTier ?? RewardTier.Common;
+  const tierPoints: Record<string, number> = {
+    Common: 50,
+    Uncommon: 100,
+    Rare: 200,
+    Epic: 500,
+    Legendary: 1000,
+  };
+
   return (
-    <div className={styles.clearSuccess}>
-      <h3 className={styles.sectionTitle}>🏆 Clear Successful!</h3>
-
-      {/* Reward metadata */}
-      <div className={styles.lootCard}>
-        <div className={styles.lootHeader}>
-          <span className={styles.lootIcon}>🎁</span>
-          <span className={styles.lootTitle}>Loot Drop</span>
-        </div>
-        <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Item</span>
-          <span className={styles.metaValue}>{reward.itemId}</span>
-        </div>
-        <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Tier</span>
-          <span className={styles.metaValue} style={{ color: rewardTierColor(reward.tier) }}>
-            {reward.tier}
-          </span>
-        </div>
-        <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Amount</span>
-          <span className={styles.metaValue}>{reward.amount} 🪙</span>
-        </div>
-        <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Clear #</span>
-          <span className={styles.metaValue}>{reward.clearCount + 1}</span>
-        </div>
-        <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Cooldown</span>
-          <span className={styles.metaValue}>{formatCooldown(reward.cooldownSeconds)}</span>
-        </div>
+    <div className={styles.detailSection}>
+      <h3 className={styles.sectionTitle}>💎 Treasure</h3>
+      <div className={styles.detailMeta}>
+        <span className={styles.metaLabel}>Tier</span>
+        <span className={styles.metaValue} style={{ color: rewardTierColor(tier) }}>
+          {tier}
+        </span>
+      </div>
+      <div className={styles.detailMeta}>
+        <span className={styles.metaLabel}>Reward</span>
+        <span className={styles.metaValue}>{tierPoints[tier] ?? 50} 🪙</span>
       </div>
 
-      {/* cNFT mint result */}
-      <div className={styles.cnftResult}>
-        <div className={styles.cnftHeader}>
-          <span>🧊 cNFT Minted</span>
-          <span className={mintResult.success ? styles.cnftSuccess : styles.cnftFailed}>
-            {mintResult.success ? "✅" : "❌"}
-          </span>
-        </div>
-        <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Log</span>
-          <span className={styles.metaValue} style={{ fontSize: 11 }}>
-            {mintResult.log}
-          </span>
-        </div>
-        <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Minted At</span>
-          <span className={styles.metaValue} style={{ fontSize: 11 }}>
-            {mintResult.mintedAt}
-          </span>
-        </div>
-      </div>
+      {treasureClaimPhase.phase === "idle" && walletConnected && (
+        <button className={styles.btnClear} onClick={onClaimTreasure} style={{ marginTop: 8 }}>
+          🎁 Claim Treasure
+        </button>
+      )}
 
-      <button className={styles.btnSecondary} onClick={onRetry} style={{ marginTop: 8 }}>
-        🔙 Back to Enemy Details
-      </button>
+      {treasureClaimPhase.phase === "claiming" && (
+        <div className={styles.battleSimulating}>
+          <div className={styles.spinner} />
+          <span>Claiming treasure...</span>
+        </div>
+      )}
+
+      {treasureClaimPhase.phase === "claimed" && (
+        <div className={styles.initialized}>
+          ✅ Claimed {tier} Treasure!
+          <div className={styles.detailMeta} style={{ marginTop: 4 }}>
+            <span className={styles.metaLabel}>cNFT</span>
+            <span className={styles.metaValue}>{treasureClaimPhase.mintResult.log}</span>
+          </div>
+        </div>
+      )}
+
+      {treasureClaimPhase.phase === "error" && (
+        <div className={styles.battleError} style={{ marginTop: 6 }}>
+          ❌ {treasureClaimPhase.message}
+        </div>
+      )}
+
+      {!walletConnected && (
+        <p className={styles.hint}>Connect wallet to claim treasure</p>
+      )}
     </div>
   );
 }

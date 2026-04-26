@@ -406,9 +406,10 @@ pub mod packrun {
         ctx: Context<SubmitBossDamage>,
         damage_score: u64,
         boss_battle_hash: [u8; 32],
-        _shard_index: u16,
+        shard_index: u16,
         proof_uri_hash: Option<[u8; 32]>,
     ) -> Result<()> {
+        let _ = shard_index;
         let now = Clock::get()?.unix_timestamp;
         validate_submit_boss_damage(
             &ctx.accounts.daily_dungeon,
@@ -687,7 +688,7 @@ pub struct BuyItem<'info> {
         seeds = [DAILY_DUNGEON_SEED, daily_dungeon.day_id.as_bytes()],
         bump = daily_dungeon.bump
     )]
-    pub daily_dungeon: Account<'info, DailyDungeon>,
+    pub daily_dungeon: Box<Account<'info, DailyDungeon>>,
     #[account(
         mut,
         seeds = [PLAYER_RUN_SEED, daily_dungeon.day_id.as_bytes(), player.key().as_ref()],
@@ -695,13 +696,13 @@ pub struct BuyItem<'info> {
         constraint = player_run.player == player.key() @ PackrunError::InvalidPlayerRun,
         constraint = player_run.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidPlayerRun
     )]
-    pub player_run: Account<'info, PlayerRun>,
+    pub player_run: Box<Account<'info, PlayerRun>>,
     #[account(
         seeds = [LOCATION_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref()],
         bump = location_account.bump,
         constraint = location_account.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidLocationAccount
     )]
-    pub location_account: Account<'info, LocationAccount>,
+    pub location_account: Box<Account<'info, LocationAccount>>,
     #[account(
         seeds = [SHOP_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref()],
         bump = shop_account.bump,
@@ -709,7 +710,7 @@ pub struct BuyItem<'info> {
         constraint = shop_account.day_id == daily_dungeon.day_id @ PackrunError::InvalidShopAccount,
         constraint = shop_account.poi_id == location_account.poi_id @ PackrunError::InvalidShopAccount
     )]
-    pub shop_account: Account<'info, ShopAccount>,
+    pub shop_account: Box<Account<'info, ShopAccount>>,
     #[account(
         mut,
         seeds = [SHOP_ITEM_SLOT_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref(), &slot_index.to_le_bytes()],
@@ -720,7 +721,7 @@ pub struct BuyItem<'info> {
         constraint = shop_item_slot.poi_id_hash == location_account.poi_id_hash @ PackrunError::InvalidShopItemSlot,
         constraint = shop_item_slot.slot_index == slot_index @ PackrunError::InvalidShopItemSlot
     )]
-    pub shop_item_slot: Account<'info, ShopItemSlotAccount>,
+    pub shop_item_slot: Box<Account<'info, ShopItemSlotAccount>>,
 }
 
 #[derive(Accounts)]
