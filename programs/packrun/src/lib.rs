@@ -319,6 +319,36 @@ pub mod packrun {
         Ok(())
     }
 
+    pub fn init_boss_damage_shard(
+        ctx: Context<InitBossDamageShard>,
+        day_id: String,
+        boss_poi_hash: [u8; 32],
+        shard_index: u16,
+    ) -> Result<()> {
+        require!(
+            ctx.accounts.daily_dungeon.day_id == day_id,
+            PackrunError::InvalidBossDamageShard
+        );
+        require!(
+            ctx.accounts.location_account.poi_id_hash == boss_poi_hash,
+            PackrunError::InvalidBossDamageShard
+        );
+        require!(
+            shard_index < ctx.accounts.daily_dungeon.boss_shard_count,
+            PackrunError::InvalidBossDamageShard
+        );
+
+        let shard = &mut ctx.accounts.boss_damage_shard;
+        shard.day_id = day_id;
+        shard.boss_location = ctx.accounts.boss_location.key();
+        shard.shard_index = shard_index;
+        shard.total_damage = 0;
+        shard.participant_count = 0;
+        shard.bump = ctx.bumps.boss_damage_shard;
+
+        Ok(())
+    }
+
     pub fn clear_enemy(
         ctx: Context<ClearEnemy>,
         battle_result_hash: [u8; 32],
@@ -452,7 +482,7 @@ pub mod packrun {
         let now = Clock::get()?.unix_timestamp;
         validate_claim_boss_participation_nft(
             &ctx.accounts.daily_dungeon,
-            &ctx.accounts.boss_location,
+            ctx.accounts.boss_location.key(),
             &ctx.accounts.player_boss_contribution,
             &ctx.accounts.boss_nft_claim,
             ctx.accounts.player.key(),
@@ -461,7 +491,7 @@ pub mod packrun {
         apply_claim_boss_participation_nft(
             &mut ctx.accounts.boss_nft_claim,
             &ctx.accounts.daily_dungeon,
-            &ctx.accounts.boss_location,
+            ctx.accounts.boss_location.key(),
             &ctx.accounts.player_boss_contribution,
             ctx.accounts.player.key(),
             now,
@@ -642,6 +672,44 @@ pub struct InitShopItemSlot<'info> {
         bump
     )]
     pub shop_item_slot: Account<'info, ShopItemSlotAccount>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(day_id: String, boss_poi_hash: [u8; 32], shard_index: u16)]
+pub struct InitBossDamageShard<'info> {
+    #[account(
+        seeds = [DAILY_DUNGEON_SEED, day_id.as_bytes()],
+        bump = daily_dungeon.bump
+    )]
+    pub daily_dungeon: Account<'info, DailyDungeon>,
+    #[account(
+        seeds = [LOCATION_SEED, day_id.as_bytes(), boss_poi_hash.as_ref()],
+        bump = location_account.bump,
+        constraint = location_account.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.day_id == day_id @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.poi_id_hash == boss_poi_hash @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.kind == LocationKind::Boss @ PackrunError::LocationIsNotBoss
+    )]
+    pub location_account: Account<'info, LocationAccount>,
+    #[account(
+        seeds = [BOSS_LOCATION_SEED, day_id.as_bytes(), boss_poi_hash.as_ref()],
+        bump = boss_location.bump,
+        constraint = boss_location.location == location_account.key() @ PackrunError::InvalidBossLocation,
+        constraint = boss_location.day_id == day_id @ PackrunError::InvalidBossLocation,
+        constraint = boss_location.poi_id == location_account.poi_id @ PackrunError::InvalidBossLocation
+    )]
+    pub boss_location: Account<'info, BossLocation>,
+    #[account(
+        init,
+        payer = payer,
+        space = BOSS_DAMAGE_SHARD_SPACE,
+        seeds = [BOSS_SHARD_SEED, day_id.as_bytes(), &shard_index.to_le_bytes()],
+        bump
+    )]
+    pub boss_damage_shard: Account<'info, BossDamageShard>,
     #[account(mut)]
     pub payer: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -1600,7 +1668,7 @@ fn apply_submit_boss_damage(
 
 fn validate_claim_boss_participation_nft(
     dungeon: &DailyDungeon,
-    boss_location: &BossLocation,
+    boss_location_key: Pubkey,
     contribution: &PlayerBossContribution,
     nft_claim: &BossNftClaim,
     player_pubkey: Pubkey,
@@ -1631,7 +1699,7 @@ fn validate_claim_boss_participation_nft(
 
     // Contribution must match this boss
     require!(
-        contribution.boss_location == boss_location.location,
+        contribution.boss_location == boss_location_key,
         PackrunError::InvalidBossContribution
     );
 
@@ -1641,14 +1709,14 @@ fn validate_claim_boss_participation_nft(
 fn apply_claim_boss_participation_nft(
     nft_claim: &mut BossNftClaim,
     dungeon: &DailyDungeon,
-    boss_location: &BossLocation,
+    boss_location_key: Pubkey,
     contribution: &PlayerBossContribution,
     player_pubkey: Pubkey,
     now: i64,
 ) -> Result<()> {
     nft_claim.day_id = dungeon.day_id.clone();
     nft_claim.player = player_pubkey;
-    nft_claim.boss_location = boss_location.location;
+    nft_claim.boss_location = boss_location_key;
     nft_claim.player_damage = contribution.total_damage;
     nft_claim.shard_index = contribution.shard_index;
     nft_claim.claimed_at = now;
@@ -3089,7 +3157,6 @@ mod tests {
     #[test]
     fn claim_boss_nft_succeeds_with_valid_contribution() {
         let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
-        let boss_location = test_boss_location();
         let mut contribution = test_boss_contribution();
         contribution.total_damage = 500;
         contribution.player = Pubkey::default();
@@ -3106,7 +3173,7 @@ mod tests {
 
         assert!(validate_claim_boss_participation_nft(
             &dungeon,
-            &boss_location,
+            Pubkey::default(),
             &contribution,
             &nft_claim,
             Pubkey::default(),
@@ -3117,7 +3184,6 @@ mod tests {
     #[test]
     fn claim_boss_nft_fails_when_dungeon_not_open_or_completed() {
         let dungeon = test_dungeon(DungeonStatus::Pending, 1_000, 2_000);
-        let boss_location = test_boss_location();
         let mut contribution = test_boss_contribution();
         contribution.total_damage = 500;
         contribution.player = Pubkey::default();
@@ -3134,7 +3200,7 @@ mod tests {
 
         assert!(validate_claim_boss_participation_nft(
             &dungeon,
-            &boss_location,
+            Pubkey::default(),
             &contribution,
             &nft_claim,
             Pubkey::default(),
@@ -3145,7 +3211,6 @@ mod tests {
     #[test]
     fn claim_boss_nft_fails_when_contribution_too_low() {
         let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
-        let boss_location = test_boss_location();
         let contribution = test_boss_contribution(); // total_damage = 0
         let nft_claim = BossNftClaim {
             day_id: String::new(),
@@ -3159,7 +3224,7 @@ mod tests {
 
         assert!(validate_claim_boss_participation_nft(
             &dungeon,
-            &boss_location,
+            Pubkey::default(),
             &contribution,
             &nft_claim,
             Pubkey::default(),
@@ -3170,7 +3235,6 @@ mod tests {
     #[test]
     fn claim_boss_nft_fails_when_already_claimed() {
         let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
-        let boss_location = test_boss_location();
         let mut contribution = test_boss_contribution();
         contribution.total_damage = 500;
         contribution.player = Pubkey::default();
@@ -3187,7 +3251,7 @@ mod tests {
 
         assert!(validate_claim_boss_participation_nft(
             &dungeon,
-            &boss_location,
+            Pubkey::default(),
             &contribution,
             &nft_claim,
             Pubkey::default(),
@@ -3198,7 +3262,6 @@ mod tests {
     #[test]
     fn claim_boss_nft_fails_when_contribution_player_mismatch() {
         let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
-        let boss_location = test_boss_location();
         let mut contribution = test_boss_contribution();
         contribution.total_damage = 500;
         contribution.player = Pubkey::new_unique(); // different player
@@ -3215,7 +3278,7 @@ mod tests {
 
         assert!(validate_claim_boss_participation_nft(
             &dungeon,
-            &boss_location,
+            Pubkey::default(),
             &contribution,
             &nft_claim,
             Pubkey::default(),
@@ -3226,7 +3289,6 @@ mod tests {
     #[test]
     fn claim_boss_nft_applies_state_correctly() {
         let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
-        let boss_location = test_boss_location();
         let mut contribution = test_boss_contribution();
         contribution.total_damage = 500;
         contribution.shard_index = 2;
@@ -3246,7 +3308,7 @@ mod tests {
         apply_claim_boss_participation_nft(
             &mut nft_claim,
             &dungeon,
-            &boss_location,
+            Pubkey::default(),
             &contribution,
             Pubkey::default(),
             now,

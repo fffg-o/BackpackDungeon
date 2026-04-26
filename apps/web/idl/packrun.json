@@ -1,0 +1,3290 @@
+{
+  "address": "AKGsUEW5WUdUQ6vWVkWWLF4CosWHfWTPMsfckWKTpvtL",
+  "metadata": {
+    "name": "packrun",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "BackpackDungeon Packrun Anchor program"
+  },
+  "instructions": [
+    {
+      "name": "buy_item",
+      "discriminator": [
+        80,
+        82,
+        193,
+        201,
+        216,
+        27,
+        70,
+        184
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "signer": true
+        },
+        {
+          "name": "daily_dungeon",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_run",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "location_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "location_account.poi_id_hash",
+                "account": "LocationAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "shop_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  104,
+                  111,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "location_account.poi_id_hash",
+                "account": "LocationAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "shop_item_slot",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  104,
+                  111,
+                  112,
+                  95,
+                  115,
+                  108,
+                  111,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "location_account.poi_id_hash",
+                "account": "LocationAccount"
+              },
+              {
+                "kind": "arg",
+                "path": "slot_index"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "slot_index",
+          "type": "u16"
+        },
+        {
+          "name": "expected_price",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_boss_participation_nft",
+      "discriminator": [
+        6,
+        16,
+        67,
+        15,
+        200,
+        161,
+        185,
+        166
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "daily_dungeon",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boss_location",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "location_account.poi_id_hash",
+                "account": "LocationAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "location_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "location_account.poi_id_hash",
+                "account": "LocationAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_boss_contribution",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  116,
+                  114,
+                  105,
+                  98,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boss_damage_shard",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115,
+                  95,
+                  115,
+                  104,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "player_boss_contribution.shard_index",
+                "account": "PlayerBossContribution"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boss_nft_claim",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115,
+                  95,
+                  110,
+                  102,
+                  116,
+                  95,
+                  99,
+                  108,
+                  97,
+                  105,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_daily_reward",
+      "discriminator": [
+        24,
+        130,
+        79,
+        89,
+        83,
+        137,
+        178,
+        108
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "daily_dungeon",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_run",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "daily_reward_claim",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  97,
+                  105,
+                  108,
+                  121,
+                  95,
+                  99,
+                  108,
+                  97,
+                  105,
+                  109
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "clear_enemy",
+      "discriminator": [
+        54,
+        244,
+        20,
+        184,
+        42,
+        214,
+        65,
+        251
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "signer": true
+        },
+        {
+          "name": "daily_dungeon",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_run",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "location_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "location_account.poi_id_hash",
+                "account": "LocationAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "enemy_location",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  101,
+                  109,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "location_account.poi_id_hash",
+                "account": "LocationAccount"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "battle_result_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "player_performance_summary",
+          "type": {
+            "defined": {
+              "name": "PlayerPerformanceSummary"
+            }
+          }
+        },
+        {
+          "name": "proof_uri_hash",
+          "type": {
+            "option": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "enter_dungeon",
+      "discriminator": [
+        211,
+        56,
+        53,
+        122,
+        199,
+        7,
+        30,
+        230
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "daily_dungeon",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_run",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "day_id",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "init_daily_dungeon",
+      "discriminator": [
+        190,
+        161,
+        160,
+        102,
+        157,
+        34,
+        176,
+        151
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "daily_dungeon",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "day_id",
+          "type": "string"
+        },
+        {
+          "name": "map_root",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "ruleset_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "width",
+          "type": "u32"
+        },
+        {
+          "name": "height",
+          "type": "u32"
+        },
+        {
+          "name": "start_ts",
+          "type": "i64"
+        },
+        {
+          "name": "end_ts",
+          "type": "i64"
+        },
+        {
+          "name": "boss_hp",
+          "type": "u64"
+        },
+        {
+          "name": "boss_shard_count",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "init_location_from_merkle",
+      "discriminator": [
+        45,
+        60,
+        3,
+        234,
+        127,
+        209,
+        199,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "daily_dungeon",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "spec.day_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "location_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "spec.day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "spec.poi_id_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "enemy_location",
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  110,
+                  101,
+                  109,
+                  121
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "spec.day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "spec.poi_id_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "shop_account",
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  104,
+                  111,
+                  112
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "spec.day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "spec.poi_id_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boss_location",
+          "writable": true,
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "spec.day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "spec.poi_id_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "spec",
+          "type": {
+            "defined": {
+              "name": "LocationSpecInput"
+            }
+          }
+        },
+        {
+          "name": "proof",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "LocationMerkleProofStep"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "init_shop_item_slot",
+      "discriminator": [
+        48,
+        85,
+        177,
+        81,
+        185,
+        244,
+        93,
+        65
+      ],
+      "accounts": [
+        {
+          "name": "daily_dungeon",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "location_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "poi_id_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "shop_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  104,
+                  111,
+                  112
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "poi_id_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "shop_item_slot",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  104,
+                  111,
+                  112,
+                  95,
+                  115,
+                  108,
+                  111,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "poi_id_hash"
+              },
+              {
+                "kind": "arg",
+                "path": "slot_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "day_id",
+          "type": "string"
+        },
+        {
+          "name": "poi_id",
+          "type": "string"
+        },
+        {
+          "name": "poi_id_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "slot_index",
+          "type": "u16"
+        },
+        {
+          "name": "slot",
+          "type": {
+            "defined": {
+              "name": "ShopItemSlotSpecInput"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "init_boss_damage_shard",
+      "discriminator": [
+        38,
+        134,
+        12,
+        121,
+        147,
+        215,
+        38,
+        202
+      ],
+      "accounts": [
+        {
+          "name": "daily_dungeon",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "location_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "boss_poi_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boss_location",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "boss_poi_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boss_damage_shard",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115,
+                  95,
+                  115,
+                  104,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "shard_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "day_id",
+          "type": "string"
+        },
+        {
+          "name": "boss_poi_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "shard_index",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [],
+      "args": []
+    },
+    {
+      "name": "submit_boss_damage",
+      "discriminator": [
+        214,
+        55,
+        73,
+        207,
+        219,
+        38,
+        86,
+        223
+      ],
+      "accounts": [
+        {
+          "name": "player",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "daily_dungeon",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_run",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  117,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "location_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "location_account.poi_id_hash",
+                "account": "LocationAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boss_location",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "location_account.poi_id_hash",
+                "account": "LocationAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boss_damage_shard",
+          "docs": [
+            "The shard_index is derived from the instruction data, not from the account seed.",
+            "We verify it matches: shard_index == hash(player_pubkey) % boss_shard_count."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115,
+                  95,
+                  115,
+                  104,
+                  97,
+                  114,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "arg",
+                "path": "shard_index"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player_boss_contribution",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  115,
+                  115,
+                  95,
+                  99,
+                  111,
+                  110,
+                  116,
+                  114,
+                  105,
+                  98,
+                  117,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "player"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "damage_score",
+          "type": "u64"
+        },
+        {
+          "name": "boss_battle_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "shard_index",
+          "type": "u16"
+        },
+        {
+          "name": "proof_uri_hash",
+          "type": {
+            "option": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "BossDamageShard",
+      "discriminator": [
+        142,
+        104,
+        180,
+        159,
+        95,
+        250,
+        242,
+        113
+      ]
+    },
+    {
+      "name": "BossLocation",
+      "discriminator": [
+        22,
+        76,
+        223,
+        68,
+        60,
+        3,
+        248,
+        9
+      ]
+    },
+    {
+      "name": "BossNftClaim",
+      "discriminator": [
+        0,
+        197,
+        92,
+        199,
+        80,
+        233,
+        21,
+        243
+      ]
+    },
+    {
+      "name": "DailyDungeon",
+      "discriminator": [
+        109,
+        197,
+        162,
+        210,
+        91,
+        165,
+        158,
+        178
+      ]
+    },
+    {
+      "name": "DailyRewardClaim",
+      "discriminator": [
+        172,
+        202,
+        36,
+        235,
+        5,
+        154,
+        104,
+        199
+      ]
+    },
+    {
+      "name": "EnemyLocation",
+      "discriminator": [
+        154,
+        169,
+        178,
+        55,
+        167,
+        21,
+        201,
+        188
+      ]
+    },
+    {
+      "name": "LocationAccount",
+      "discriminator": [
+        55,
+        158,
+        205,
+        80,
+        27,
+        4,
+        233,
+        90
+      ]
+    },
+    {
+      "name": "PlayerBossContribution",
+      "discriminator": [
+        234,
+        145,
+        98,
+        37,
+        28,
+        102,
+        132,
+        189
+      ]
+    },
+    {
+      "name": "PlayerRun",
+      "discriminator": [
+        28,
+        35,
+        94,
+        183,
+        14,
+        71,
+        195,
+        121
+      ]
+    },
+    {
+      "name": "ShopAccount",
+      "discriminator": [
+        209,
+        5,
+        137,
+        109,
+        214,
+        229,
+        81,
+        210
+      ]
+    },
+    {
+      "name": "ShopItemSlotAccount",
+      "discriminator": [
+        119,
+        14,
+        145,
+        40,
+        77,
+        42,
+        151,
+        23
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "BossDamageSubmitted",
+      "discriminator": [
+        202,
+        120,
+        12,
+        74,
+        114,
+        241,
+        106,
+        158
+      ]
+    },
+    {
+      "name": "BossNftClaimed",
+      "discriminator": [
+        89,
+        3,
+        158,
+        177,
+        252,
+        76,
+        193,
+        75
+      ]
+    },
+    {
+      "name": "DailyRewardClaimed",
+      "discriminator": [
+        148,
+        21,
+        255,
+        155,
+        242,
+        125,
+        124,
+        57
+      ]
+    },
+    {
+      "name": "EnemyCleared",
+      "discriminator": [
+        5,
+        227,
+        49,
+        84,
+        47,
+        45,
+        108,
+        133
+      ]
+    },
+    {
+      "name": "ItemPurchased",
+      "discriminator": [
+        33,
+        219,
+        12,
+        58,
+        205,
+        48,
+        63,
+        143
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "DayIdTooLong",
+      "msg": "day_id exceeds the maximum supported length."
+    },
+    {
+      "code": 6001,
+      "name": "InvalidMapDimensions",
+      "msg": "width and height must both be greater than zero."
+    },
+    {
+      "code": 6002,
+      "name": "InvalidTimeRange",
+      "msg": "start_ts must be less than end_ts."
+    },
+    {
+      "code": 6003,
+      "name": "InvalidBossHp",
+      "msg": "boss_hp must be greater than zero."
+    },
+    {
+      "code": 6004,
+      "name": "InvalidBossShardCount",
+      "msg": "boss_shard_count must be greater than zero."
+    },
+    {
+      "code": 6005,
+      "name": "DungeonDayMismatch",
+      "msg": "daily dungeon account does not match the requested day_id."
+    },
+    {
+      "code": 6006,
+      "name": "DungeonNotOpen",
+      "msg": "daily dungeon is not open."
+    },
+    {
+      "code": 6007,
+      "name": "DungeonNotInOpenWindow",
+      "msg": "current time is outside the daily dungeon open window."
+    },
+    {
+      "code": 6008,
+      "name": "PoiIdTooLong",
+      "msg": "poi_id exceeds the maximum supported length."
+    },
+    {
+      "code": 6009,
+      "name": "PoiIdHashMismatch",
+      "msg": "poi_id_hash does not match poi_id."
+    },
+    {
+      "code": 6010,
+      "name": "LocationDetailTooLong",
+      "msg": "location detail field exceeds the maximum supported length."
+    },
+    {
+      "code": 6011,
+      "name": "InvalidLocationMerkleProof",
+      "msg": "location Merkle proof is invalid."
+    },
+    {
+      "code": 6012,
+      "name": "MerkleProofTooLong",
+      "msg": "location Merkle proof is too long."
+    },
+    {
+      "code": 6013,
+      "name": "MissingLocationDetail",
+      "msg": "required location detail account or spec is missing."
+    },
+    {
+      "code": 6014,
+      "name": "UnexpectedLocationDetail",
+      "msg": "unexpected location detail account was provided."
+    },
+    {
+      "code": 6015,
+      "name": "InvalidPlayerRun",
+      "msg": "player run account is invalid."
+    },
+    {
+      "code": 6016,
+      "name": "InvalidLocationAccount",
+      "msg": "location account is invalid."
+    },
+    {
+      "code": 6017,
+      "name": "InvalidEnemyLocation",
+      "msg": "enemy location account is invalid."
+    },
+    {
+      "code": 6018,
+      "name": "LocationIsNotShop",
+      "msg": "location is not a shop."
+    },
+    {
+      "code": 6019,
+      "name": "InvalidShopAccount",
+      "msg": "shop account is invalid."
+    },
+    {
+      "code": 6020,
+      "name": "InvalidShopItemSlot",
+      "msg": "shop item slot configuration is invalid."
+    },
+    {
+      "code": 6021,
+      "name": "PlayerRunNotActive",
+      "msg": "player run is not active."
+    },
+    {
+      "code": 6022,
+      "name": "LocationIsNotEnemy",
+      "msg": "location is not an enemy."
+    },
+    {
+      "code": 6023,
+      "name": "EnemyOnCooldown",
+      "msg": "enemy is still on cooldown."
+    },
+    {
+      "code": 6024,
+      "name": "InsufficientEnergy",
+      "msg": "player does not have enough energy."
+    },
+    {
+      "code": 6025,
+      "name": "DailyClearLimitExceeded",
+      "msg": "player has exceeded the daily enemy clear limit."
+    },
+    {
+      "code": 6026,
+      "name": "ArithmeticOverflow",
+      "msg": "arithmetic overflow."
+    },
+    {
+      "code": 6027,
+      "name": "InsufficientStock",
+      "msg": "shop item slot has insufficient stock."
+    },
+    {
+      "code": 6028,
+      "name": "PriceMismatch",
+      "msg": "expected price does not match the computed price."
+    },
+    {
+      "code": 6029,
+      "name": "PurchaseLimitExceeded",
+      "msg": "player has exceeded the per-wallet daily purchase limit for this item."
+    },
+    {
+      "code": 6030,
+      "name": "InvalidDamageScore",
+      "msg": "damage_score must be greater than zero."
+    },
+    {
+      "code": 6031,
+      "name": "DamageScoreExceeded",
+      "msg": "damage_score exceeds the maximum allowed per submission."
+    },
+    {
+      "code": 6032,
+      "name": "ShardIndexMismatch",
+      "msg": "shard_index does not match the player's assigned shard."
+    },
+    {
+      "code": 6033,
+      "name": "BossSubmissionLimitExceeded",
+      "msg": "player has exceeded the boss submission limit for this daily dungeon."
+    },
+    {
+      "code": 6034,
+      "name": "LocationIsNotBoss",
+      "msg": "location is not a boss location."
+    },
+    {
+      "code": 6035,
+      "name": "InvalidBossDamageShard",
+      "msg": "boss damage shard account is invalid."
+    },
+    {
+      "code": 6036,
+      "name": "InvalidBossContribution",
+      "msg": "player boss contribution account is invalid."
+    },
+    {
+      "code": 6037,
+      "name": "InvalidBossLocation",
+      "msg": "boss location account is invalid."
+    },
+    {
+      "code": 6038,
+      "name": "InsufficientBossDamage",
+      "msg": "player has not dealt enough damage to claim the boss NFT."
+    },
+    {
+      "code": 6039,
+      "name": "BossNftAlreadyClaimed",
+      "msg": "player has already claimed the boss NFT for this daily dungeon."
+    },
+    {
+      "code": 6040,
+      "name": "DungeonNotEnded",
+      "msg": "daily dungeon has not ended yet."
+    },
+    {
+      "code": 6041,
+      "name": "DailyRewardAlreadyClaimed",
+      "msg": "player has already claimed the daily reward for this dungeon."
+    },
+    {
+      "code": 6042,
+      "name": "DailyRewardTierNotMet",
+      "msg": "player run does not satisfy any reward tier condition."
+    },
+    {
+      "code": 6043,
+      "name": "PlayerRunNotFound",
+      "msg": "player run not found for this day and player."
+    }
+  ],
+  "types": [
+    {
+      "name": "BossDamageShard",
+      "docs": [
+        "PDA: [\"boss_shard\", day_id, shard_index]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "boss_location",
+            "type": "pubkey"
+          },
+          {
+            "name": "shard_index",
+            "type": "u16"
+          },
+          {
+            "name": "total_damage",
+            "type": "u64"
+          },
+          {
+            "name": "participant_count",
+            "type": "u32"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BossDamageSubmitted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "boss_location",
+            "type": "pubkey"
+          },
+          {
+            "name": "shard_index",
+            "type": "u16"
+          },
+          {
+            "name": "damage_score",
+            "type": "u64"
+          },
+          {
+            "name": "boss_battle_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "proof_uri_hash",
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  32
+                ]
+              }
+            }
+          },
+          {
+            "name": "total_damage",
+            "type": "u64"
+          },
+          {
+            "name": "participant_count",
+            "type": "u32"
+          },
+          {
+            "name": "player_total_damage",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BossLocation",
+      "docs": [
+        "PDA: [\"boss\", day_id, poi_id_hash]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "location",
+            "type": "pubkey"
+          },
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "poi_id",
+            "type": "string"
+          },
+          {
+            "name": "boss_id",
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "level",
+            "type": "u16"
+          },
+          {
+            "name": "base_hp",
+            "type": "u32"
+          },
+          {
+            "name": "base_damage",
+            "type": "u32"
+          },
+          {
+            "name": "reward_tier",
+            "type": {
+              "defined": {
+                "name": "RewardTier"
+              }
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BossNftClaim",
+      "docs": [
+        "PDA: [\"boss_nft_claim\", day_id, player]",
+        "Tracks whether a player has claimed their Boss participation NFT for a given day."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "boss_location",
+            "type": "pubkey"
+          },
+          {
+            "name": "player_damage",
+            "type": "u64"
+          },
+          {
+            "name": "shard_index",
+            "type": "u16"
+          },
+          {
+            "name": "claimed_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BossNftClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "boss_id",
+            "type": "string"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "player_damage",
+            "type": "u64"
+          },
+          {
+            "name": "shard_index",
+            "type": "u16"
+          },
+          {
+            "name": "total_damage_snapshot",
+            "type": "u64"
+          },
+          {
+            "name": "boss_location",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BossSpecInput",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "id",
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "level",
+            "type": "u16"
+          },
+          {
+            "name": "max_health",
+            "type": "u32"
+          },
+          {
+            "name": "attack",
+            "type": "u32"
+          },
+          {
+            "name": "reward_tier",
+            "type": {
+              "defined": {
+                "name": "RewardTier"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DailyDungeon",
+      "docs": [
+        "PDA: [\"dungeon\", day_id]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "DungeonStatus"
+              }
+            }
+          },
+          {
+            "name": "map_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "ruleset_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "width",
+            "type": "u32"
+          },
+          {
+            "name": "height",
+            "type": "u32"
+          },
+          {
+            "name": "location_count",
+            "type": "u32"
+          },
+          {
+            "name": "enemy_count",
+            "type": "u32"
+          },
+          {
+            "name": "shop_count",
+            "type": "u32"
+          },
+          {
+            "name": "treasure_count",
+            "type": "u32"
+          },
+          {
+            "name": "boss_count",
+            "type": "u32"
+          },
+          {
+            "name": "start_ts",
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "boss_hp",
+            "type": "u64"
+          },
+          {
+            "name": "boss_shard_count",
+            "type": "u16"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DailyRewardClaim",
+      "docs": [
+        "PDA: [\"daily_claim\", day_id, player]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_tier",
+            "type": {
+              "defined": {
+                "name": "RewardTier"
+              }
+            }
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "claimed_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DailyRewardClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_tier",
+            "type": {
+              "defined": {
+                "name": "RewardTier"
+              }
+            }
+          },
+          {
+            "name": "cleared_locations",
+            "type": "u32"
+          },
+          {
+            "name": "boss_damage",
+            "type": "u64"
+          },
+          {
+            "name": "claimed_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DungeonStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Completed"
+          },
+          {
+            "name": "Expired"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EnemyCleared",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "battle_result_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "clear_count",
+            "type": "u64"
+          },
+          {
+            "name": "common_loot_count",
+            "type": "u32"
+          },
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "difficulty_level",
+            "type": "u16"
+          },
+          {
+            "name": "energy_spent",
+            "type": "u16"
+          },
+          {
+            "name": "location",
+            "type": "pubkey"
+          },
+          {
+            "name": "next_available_at",
+            "type": "i64"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "poi_id",
+            "type": "string"
+          },
+          {
+            "name": "proof_uri_hash",
+            "type": {
+              "option": {
+                "array": [
+                  "u8",
+                  32
+                ]
+              }
+            }
+          },
+          {
+            "name": "rare_eligibility_points_awarded",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EnemyLocation",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "location",
+            "type": "pubkey"
+          },
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "poi_id",
+            "type": "string"
+          },
+          {
+            "name": "enemy_id",
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "level",
+            "type": "u16"
+          },
+          {
+            "name": "base_hp",
+            "type": "u32"
+          },
+          {
+            "name": "base_damage",
+            "type": "u32"
+          },
+          {
+            "name": "difficulty_level",
+            "type": "u16"
+          },
+          {
+            "name": "max_reward_tier",
+            "type": {
+              "defined": {
+                "name": "RewardTier"
+              }
+            }
+          },
+          {
+            "name": "valuable_clear_cap",
+            "type": "u16"
+          },
+          {
+            "name": "clear_count",
+            "type": "u64"
+          },
+          {
+            "name": "base_cooldown_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "next_available_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EnemySpecInput",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "id",
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "level",
+            "type": "u16"
+          },
+          {
+            "name": "max_health",
+            "type": "u32"
+          },
+          {
+            "name": "attack",
+            "type": "u32"
+          },
+          {
+            "name": "reward_tier",
+            "type": {
+              "defined": {
+                "name": "RewardTier"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ItemPurchased",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "location",
+            "type": "pubkey"
+          },
+          {
+            "name": "shop",
+            "type": "pubkey"
+          },
+          {
+            "name": "shop_item_slot",
+            "type": "pubkey"
+          },
+          {
+            "name": "slot_index",
+            "type": "u16"
+          },
+          {
+            "name": "poi_id",
+            "type": "string"
+          },
+          {
+            "name": "item_id",
+            "type": "string"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "sold_count",
+            "type": "u64"
+          },
+          {
+            "name": "player_item_count",
+            "type": "u32"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LocationAccount",
+      "docs": [
+        "PDA: [\"location\", day_id, poi_id_hash]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "daily_dungeon",
+            "type": "pubkey"
+          },
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "poi_id",
+            "type": "string"
+          },
+          {
+            "name": "poi_id_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "LocationKind"
+              }
+            }
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "LocationStatus"
+              }
+            }
+          },
+          {
+            "name": "x",
+            "type": "u32"
+          },
+          {
+            "name": "y",
+            "type": "u32"
+          },
+          {
+            "name": "base_config_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LocationKind",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Enemy"
+          },
+          {
+            "name": "Shop"
+          },
+          {
+            "name": "Treasure"
+          },
+          {
+            "name": "Boss"
+          },
+          {
+            "name": "Event"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LocationMerkleProofStep",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "sibling",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "position",
+            "type": {
+              "defined": {
+                "name": "MerkleProofPosition"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LocationSpecInput",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "poi_id",
+            "type": "string"
+          },
+          {
+            "name": "poi_id_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "kind",
+            "type": {
+              "defined": {
+                "name": "LocationKind"
+              }
+            }
+          },
+          {
+            "name": "x",
+            "type": "u32"
+          },
+          {
+            "name": "y",
+            "type": "u32"
+          },
+          {
+            "name": "base_config_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "enemy",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "EnemySpecInput"
+                }
+              }
+            }
+          },
+          {
+            "name": "shop",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "ShopSpecInput"
+                }
+              }
+            }
+          },
+          {
+            "name": "boss",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "BossSpecInput"
+                }
+              }
+            }
+          },
+          {
+            "name": "reward_tier",
+            "type": {
+              "option": {
+                "defined": {
+                  "name": "RewardTier"
+                }
+              }
+            }
+          },
+          {
+            "name": "event_id",
+            "type": {
+              "option": "string"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "LocationStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Hidden"
+          },
+          {
+            "name": "Available"
+          },
+          {
+            "name": "Cleared"
+          },
+          {
+            "name": "Exhausted"
+          },
+          {
+            "name": "Locked"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MerkleProofPosition",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Left"
+          },
+          {
+            "name": "Right"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerBossContribution",
+      "docs": [
+        "PDA: [\"boss_contribution\", day_id, player]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "boss_location",
+            "type": "pubkey"
+          },
+          {
+            "name": "shard_index",
+            "type": "u16"
+          },
+          {
+            "name": "total_damage",
+            "type": "u64"
+          },
+          {
+            "name": "last_hit_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerPerformanceSummary",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "damage_dealt",
+            "type": "u32"
+          },
+          {
+            "name": "damage_taken",
+            "type": "u32"
+          },
+          {
+            "name": "turns_taken",
+            "type": "u16"
+          },
+          {
+            "name": "score",
+            "type": "u32"
+          },
+          {
+            "name": "flawless",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PlayerRun",
+      "docs": [
+        "PDA: [\"run\", day_id, player]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "player",
+            "type": "pubkey"
+          },
+          {
+            "name": "daily_dungeon",
+            "type": "pubkey"
+          },
+          {
+            "name": "energy",
+            "type": "u16"
+          },
+          {
+            "name": "cleared_locations",
+            "type": "u32"
+          },
+          {
+            "name": "boss_damage",
+            "type": "u64"
+          },
+          {
+            "name": "common_loot_count",
+            "type": "u32"
+          },
+          {
+            "name": "rare_eligibility_points",
+            "type": "u32"
+          },
+          {
+            "name": "items_purchased",
+            "type": "u32"
+          },
+          {
+            "name": "entered_at",
+            "type": "i64"
+          },
+          {
+            "name": "active",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RewardTier",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Common"
+          },
+          {
+            "name": "Uncommon"
+          },
+          {
+            "name": "Rare"
+          },
+          {
+            "name": "Epic"
+          },
+          {
+            "name": "Legendary"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ShopAccount",
+      "docs": [
+        "PDA: [\"shop\", day_id, poi_id_hash]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "location",
+            "type": "pubkey"
+          },
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "poi_id",
+            "type": "string"
+          },
+          {
+            "name": "keeper_name",
+            "type": "string"
+          },
+          {
+            "name": "slot_count",
+            "type": "u16"
+          },
+          {
+            "name": "opened_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ShopItemSlotAccount",
+      "docs": [
+        "PDA: [\"shop_slot\", day_id, poi_id_hash, slot_index]"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "shop",
+            "type": "pubkey"
+          },
+          {
+            "name": "day_id",
+            "type": "string"
+          },
+          {
+            "name": "poi_id",
+            "type": "string"
+          },
+          {
+            "name": "poi_id_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "slot_index",
+            "type": "u16"
+          },
+          {
+            "name": "item_id",
+            "type": "string"
+          },
+          {
+            "name": "reward_tier",
+            "type": {
+              "defined": {
+                "name": "RewardTier"
+              }
+            }
+          },
+          {
+            "name": "base_price",
+            "type": "u64"
+          },
+          {
+            "name": "base_stock",
+            "type": "u16"
+          },
+          {
+            "name": "max_stock",
+            "type": "u16"
+          },
+          {
+            "name": "sold_count",
+            "type": "u64"
+          },
+          {
+            "name": "restock_interval_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "max_restock_count",
+            "type": "u16"
+          },
+          {
+            "name": "per_wallet_daily_limit",
+            "type": "u16"
+          },
+          {
+            "name": "opened_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ShopItemSlotSpecInput",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "slot_id",
+            "type": "string"
+          },
+          {
+            "name": "item_id",
+            "type": "string"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "base_stock",
+            "type": "u16"
+          },
+          {
+            "name": "max_stock",
+            "type": "u16"
+          },
+          {
+            "name": "restock_interval_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "max_restock_count",
+            "type": "u16"
+          },
+          {
+            "name": "per_wallet_daily_limit",
+            "type": "u16"
+          },
+          {
+            "name": "reward_tier",
+            "type": {
+              "defined": {
+                "name": "RewardTier"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ShopSpecInput",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "id",
+            "type": "string"
+          },
+          {
+            "name": "keeper_name",
+            "type": {
+              "option": "string"
+            }
+          },
+          {
+            "name": "item_slots",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "ShopItemSlotSpecInput"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

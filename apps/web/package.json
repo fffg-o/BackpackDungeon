@@ -9,14 +9,24 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@backpack-dungeon/cnft-adapter": "workspace:*",
     "@backpack-dungeon/game-core": "workspace:*",
     "@backpack-dungeon/shared": "workspace:*",
+    "@coral-xyz/anchor": "^0.32.1",
+    "@noble/hashes": "^2.2.0",
+    "@solana/wallet-adapter-base": "^0.9.27",
+    "@solana/wallet-adapter-phantom": "^0.9.29",
+    "@solana/wallet-adapter-react": "^0.15.39",
+    "@solana/wallet-adapter-react-ui": "^0.9.39",
+    "@solana/wallet-adapter-solflare": "^0.6.33",
+    "@solana/wallet-adapter-wallets": "^0.19.38",
+    "@solana/web3.js": "^1.98.4",
+    "bn.js": "^5.2.3",
     "next": "^15.4.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@types/bn.js": "^5.2.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.8.0"

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import "@solana/wallet-adapter-react-ui/styles.css";
 import "./globals.css";
+import { Providers } from "./providers";
 
 export const metadata: Metadata = {
   title: "BackpackDungeon",
@@ -23,7 +25,7 @@ export default function RootLayout({
             🗺️ Daily Dungeon
           </Link>
         </nav>
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
