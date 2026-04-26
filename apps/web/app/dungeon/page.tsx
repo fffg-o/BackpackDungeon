@@ -9,9 +9,13 @@ import {
   computeEnemyStats,
   computeBossDamage,
   getBossShardIndex,
+  aggregateBossDamage,
+  isBossDefeated,
+  computeBossParticipationTier,
   type DailyLocationSpec,
   type DailyMapInput,
   type EnemyReward,
+  type BossParticipationTier,
 } from "@backpack-dungeon/game-core";
 import { LocationKind, RewardTier } from "@backpack-dungeon/shared";
 import type { LocationKind as LocationKindType } from "@backpack-dungeon/shared";
@@ -71,6 +75,12 @@ type BossBattlePhase =
   | { readonly phase: "error"; readonly message: string };
 
 type TreasureClaimPhase =
+  | { readonly phase: "idle" }
+  | { readonly phase: "claiming" }
+  | { readonly phase: "claimed"; readonly mintResult: MintResult }
+  | { readonly phase: "error"; readonly message: string };
+
+type BossNftClaimPhase =
   | { readonly phase: "idle" }
   | { readonly phase: "claiming" }
   | { readonly phase: "claimed"; readonly mintResult: MintResult }
@@ -195,6 +205,7 @@ export default function DailyDungeonPage() {
   const [shopBuyPhase, setShopBuyPhase] = useState<ShopBuyPhase>({ phase: "idle" });
   const [bossBattlePhase, setBossBattlePhase] = useState<BossBattlePhase>({ phase: "idle" });
   const [treasureClaimPhase, setTreasureClaimPhase] = useState<TreasureClaimPhase>({ phase: "idle" });
+  const [bossNftClaimPhase, setBossNftClaimPhase] = useState<BossNftClaimPhase>({ phase: "idle" });
   const [localClearCounts, setLocalClearCounts] = useState<Record<string, number>>({});
   const [playerPoints, setPlayerPoints] = useState(500);
 
@@ -242,6 +253,7 @@ export default function DailyDungeonPage() {
       setShopBuyPhase({ phase: "idle" });
       setBossBattlePhase({ phase: "idle" });
       setTreasureClaimPhase({ phase: "idle" });
+      setBossNftClaimPhase({ phase: "idle" });
     },
     [map]
   );
@@ -483,6 +495,48 @@ export default function DailyDungeonPage() {
     }
   }, [selectedPoi, map.dayId]);
 
+  // ── Boss NFT Claim Flow ──────────────────────────────────────────────────
+
+  const handleClaimBossNft = useCallback(async () => {
+    if (!selectedPoi?.spec.boss || !selectedPoi.onChain) return;
+    setBossNftClaimPhase({ phase: "claiming" });
+
+    try {
+      await new Promise((r) => setTimeout(r, 600));
+
+      const boss = selectedPoi.spec.boss;
+      const rawShards = selectedPoi.onChain.bossShards ?? [];
+      const shards = rawShards.map((s) => ({
+        shardIndex: s.index,
+        totalDamage: s.totalDamage,
+      }));
+      const totalDamage = aggregateBossDamage(shards);
+      const tier = computeBossParticipationTier(totalDamage, boss.maxHealth);
+
+      const mintResult = await mockCnftAdapter.mintBossParticipationCnft({
+        name: `${boss.name} Defeat Reward`,
+        symbol: "BOSS",
+        description: `Awarded for defeating ${boss.name} (tier: ${tier})`,
+        image: `https://backpack-dungeon.example/boss/${boss.id}-reward.png`,
+        attributes: [
+          { trait_type: "category", value: "boss_participation" },
+          { trait_type: "boss_id", value: boss.id },
+          { trait_type: "day_id", value: map.dayId },
+          { trait_type: "tier", value: tier },
+          { trait_type: "total_damage", value: totalDamage },
+        ],
+      });
+
+      setPlayerPoints((prev) => prev + 500);
+      setBossNftClaimPhase({ phase: "claimed", mintResult });
+    } catch (err) {
+      setBossNftClaimPhase({
+        phase: "error",
+        message: err instanceof Error ? err.message : "Failed to claim Boss NFT",
+      });
+    }
+  }, [selectedPoi, map.dayId]);
+
   // ── Wallet Connection ─────────────────────────────────────────────────────
 
   const connectWallet = useCallback(async () => {
@@ -522,6 +576,7 @@ export default function DailyDungeonPage() {
     setShopBuyPhase({ phase: "idle" });
     setBossBattlePhase({ phase: "idle" });
     setTreasureClaimPhase({ phase: "idle" });
+    setBossNftClaimPhase({ phase: "idle" });
   }, []);
 
   return (
@@ -634,6 +689,8 @@ export default function DailyDungeonPage() {
               onSubmitBossDamage={handleSubmitBossDamage}
               treasureClaimPhase={treasureClaimPhase}
               onClaimTreasure={handleClaimTreasure}
+              bossNftClaimPhase={bossNftClaimPhase}
+              onClaimBossNft={handleClaimBossNft}
             />
           ) : (
             <div className={styles.emptyState}>
@@ -667,6 +724,8 @@ function PoiDetailPanel({
   onSubmitBossDamage,
   treasureClaimPhase,
   onClaimTreasure,
+  bossNftClaimPhase,
+  onClaimBossNft,
 }: {
   readonly detail: PoiDetail;
   readonly merkleRoot: string;
@@ -685,6 +744,8 @@ function PoiDetailPanel({
   readonly onSubmitBossDamage: () => void;
   readonly treasureClaimPhase: TreasureClaimPhase;
   readonly onClaimTreasure: () => void;
+  readonly bossNftClaimPhase: BossNftClaimPhase;
+  readonly onClaimBossNft: () => void;
 }) {
   const { spec, onChain, merkleProof } = detail;
   const onCooldown = isOnCooldown(onChain);
@@ -748,6 +809,8 @@ function PoiDetailPanel({
           onStartBossBattle={onStartBossBattle}
           onSubmitBossDamage={onSubmitBossDamage}
           walletConnected={walletConnected}
+          bossNftClaimPhase={bossNftClaimPhase}
+          onClaimBossNft={onClaimBossNft}
         />
       )}
 
@@ -1009,6 +1072,8 @@ function BossContent({
   onStartBossBattle,
   onSubmitBossDamage,
   walletConnected,
+  bossNftClaimPhase,
+  onClaimBossNft,
 }: {
   readonly boss: NonNullable<DailyLocationSpec["boss"]>;
   readonly onChain: OnChainState | null;
@@ -1016,7 +1081,21 @@ function BossContent({
   readonly onStartBossBattle: () => void;
   readonly onSubmitBossDamage: () => void;
   readonly walletConnected: boolean;
+  readonly bossNftClaimPhase: BossNftClaimPhase;
+  readonly onClaimBossNft: () => void;
 }) {
+  // Compute total boss damage from shards
+  const totalBossDamage = useMemo(() => {
+    if (!onChain?.bossShards) return 0;
+    const shards = onChain.bossShards.map((s) => ({
+      shardIndex: s.index,
+      totalDamage: s.totalDamage,
+    }));
+    return aggregateBossDamage(shards);
+  }, [onChain]);
+
+  const bossDefeated = totalBossDamage > 0 && isBossDefeated(totalBossDamage, boss.maxHealth);
+
   return (
     <div className={styles.detailSection}>
       <h3 className={styles.sectionTitle}>👹 Boss: {boss.name}</h3>
@@ -1039,9 +1118,26 @@ function BossContent({
         </span>
       </div>
 
-      {/* Shard progress */}
+      {/* Boss HP progress bar */}
       {onChain?.bossShards && (
         <div className={styles.bossShards}>
+          <h4 className={styles.sectionTitle}>Boss HP Progress</h4>
+          <div className={styles.bossHpBar}>
+            <div
+              className={styles.bossHpFill}
+              style={{
+                width: `${Math.min(100, (totalBossDamage / boss.maxHealth) * 100)}%`,
+                background: bossDefeated ? "#2ecc71" : "#e74c3c",
+              }}
+            />
+          </div>
+          <div className={styles.detailMeta}>
+            <span className={styles.metaLabel}>Damage Dealt</span>
+            <span className={styles.metaValue}>
+              {totalBossDamage} / {boss.maxHealth}
+              {bossDefeated && " 💀 DEFEATED"}
+            </span>
+          </div>
           <h4 className={styles.sectionTitle}>Shard Progress</h4>
           {onChain.bossShards.map((shard) => (
             <div key={shard.index} className={styles.detailMeta}>
@@ -1055,7 +1151,7 @@ function BossContent({
       )}
 
       {/* Boss battle UI */}
-      {bossBattlePhase.phase === "idle" && walletConnected && (
+      {bossBattlePhase.phase === "idle" && walletConnected && !bossDefeated && (
         <button className={styles.btnClear} onClick={onStartBossBattle} style={{ marginTop: 8 }}>
           ⚔️ Start Boss Battle
         </button>
@@ -1119,6 +1215,36 @@ function BossContent({
       {bossBattlePhase.phase === "error" && (
         <div className={styles.battleError} style={{ marginTop: 6 }}>
           ❌ {bossBattlePhase.message}
+        </div>
+      )}
+
+      {/* Boss defeated → claim NFT button */}
+      {bossDefeated && walletConnected && bossNftClaimPhase.phase === "idle" && (
+        <button className={styles.btnInit} onClick={onClaimBossNft} style={{ marginTop: 8 }}>
+          🏆 Claim Boss Defeat NFT
+        </button>
+      )}
+
+      {bossNftClaimPhase.phase === "claiming" && (
+        <div className={styles.battleSimulating}>
+          <div className={styles.spinner} />
+          <span>Claiming Boss NFT...</span>
+        </div>
+      )}
+
+      {bossNftClaimPhase.phase === "claimed" && (
+        <div className={styles.initialized}>
+          ✅ Boss NFT Claimed!
+          <div className={styles.detailMeta} style={{ marginTop: 4 }}>
+            <span className={styles.metaLabel}>cNFT</span>
+            <span className={styles.metaValue}>{bossNftClaimPhase.mintResult.log}</span>
+          </div>
+        </div>
+      )}
+
+      {bossNftClaimPhase.phase === "error" && (
+        <div className={styles.battleError} style={{ marginTop: 6 }}>
+          ❌ {bossNftClaimPhase.message}
         </div>
       )}
 

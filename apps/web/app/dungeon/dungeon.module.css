@@ -331,6 +331,10 @@
 
 /* ── Boss Shards ──────────────────────────────────────────────────────────── */
 
+.bossShards {
+  margin-top: 8px;
+}
+
 .shardRow {
   display: flex;
   justify-content: space-between;
@@ -352,6 +356,25 @@
   font-size: 11px;
   color: #8a929a;
   font-family: monospace;
+}
+
+/* ── Boss HP Bar ──────────────────────────────────────────────────────────── */
+
+.bossHpBar {
+  width: 100%;
+  height: 20px;
+  background: #1a1e22;
+  border: 1px solid #2a2e32;
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.bossHpFill {
+  height: 100%;
+  border-radius: 10px;
+  transition: width 0.5s ease, background 0.5s ease;
+  min-width: 4px;
 }
 
 /* ── Actions ──────────────────────────────────────────────────────────────── */
@@ -551,6 +574,15 @@
   flex-direction: column;
   gap: 6px;
   margin-top: 8px;
+}
+
+.buttonRow {
+  display: flex;
+  gap: 8px;
+}
+
+.buttonRow > * {
+  flex: 1;
 }
 
 .btnClear {

@@ -1,5 +1,19 @@
 export type DayId = string;
 
+// ── NFT metadata builders ──
+export {
+  buildEnemyLootMetadata,
+  buildBossParticipationMetadata,
+  buildDailyRewardMetadata,
+} from "./nft-metadata.js";
+
+export type {
+  NftMetadataParams,
+  EnemyLootMetadataParams,
+  BossParticipationMetadataParams,
+  DailyRewardMetadataParams,
+} from "./nft-metadata.js";
+
 export interface Position {
   readonly x: number;
   readonly y: number;
