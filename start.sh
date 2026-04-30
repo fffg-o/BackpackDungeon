@@ -9,6 +9,10 @@
 #   ./start.sh --test       # Run the test suite instead of starting services
 #   ./start.sh --clean      # Clean all build artifacts and start fresh
 #
+# Environment:
+#   PACKRUN_RANDOM_SEED     # Optional numeric seed for all daily map randomness
+#   PACKRUN_DAY_ID          # Optional YYYY-MM-DD override for local testing
+#
 # This script:
 #   1. Installs dependencies (pnpm install) — checks ROOT + sub-packages
 #   2. Builds all workspace packages (shared, game-core, cnft-adapter)
@@ -291,27 +295,36 @@ log_step "Step 4.5: Initializing today's DailyDungeon"
 # Set RPC URL + wallet for Anchor provider used by the init scripts
 export ANCHOR_PROVIDER_URL="http://127.0.0.1:8899"
 export ANCHOR_WALLET="$ANCHOR_KEYPAIR"
+log_info "Daily map random seed: ${PACKRUN_RANDOM_SEED:-game-core default}"
 
-cd "$PROJECT_ROOT" && node scripts/init-daily-dungeon.mjs && {
-  log_ok "DailyDungeon initialized for $(date +%F)"
-} || {
-  log_warn "DailyDungeon init failed (might already be initialized); continuing..."
-}
+if cd "$PROJECT_ROOT" && node scripts/init-daily-dungeon.mjs; then
+  log_ok "DailyDungeon initialized or already matches config for $(date +%F)"
+else
+  log_error "DailyDungeon init failed. Check PACKRUN_RANDOM_SEED/PACKRUN_DAY_ID or reset localnet."
+  exit 1
+fi
 
 # ── Step 4.6: Crank — initialize all POI LocationAccount PDAs ─────────────────
 log_step "Step 4.6: Crank — initializing all POI locations from Merkle tree"
 
-cd "$PROJECT_ROOT" && node scripts/init-all-locations.mjs && {
+if cd "$PROJECT_ROOT" && node scripts/init-all-locations.mjs; then
   log_ok "All POI locations initialized for $(date +%F)"
-} || {
-  log_warn "POI location init encountered errors (check logs above); continuing..."
-}
+else
+  log_error "POI location init failed. Check the crank logs above."
+  exit 1
+fi
 
 # ── Step 5: Start web frontend ────────────────────────────────────────────────
 log_step "Step 5: Starting web frontend"
 
 # Ensure the web frontend uses the localnet RPC (not devnet)
 export NEXT_PUBLIC_SOLANA_RPC_URL="http://127.0.0.1:8899"
+if [ -n "${PACKRUN_RANDOM_SEED:-}" ] && [ -z "${NEXT_PUBLIC_PACKRUN_RANDOM_SEED:-}" ]; then
+  export NEXT_PUBLIC_PACKRUN_RANDOM_SEED="$PACKRUN_RANDOM_SEED"
+fi
+if [ -n "${PACKRUN_DAY_ID:-}" ] && [ -z "${NEXT_PUBLIC_PACKRUN_DAY_ID:-}" ]; then
+  export NEXT_PUBLIC_PACKRUN_DAY_ID="$PACKRUN_DAY_ID"
+fi
 
 log_info "Starting Next.js dev server on http://localhost:3000 ..."
 cd "$PROJECT_ROOT" && pnpm dev:web

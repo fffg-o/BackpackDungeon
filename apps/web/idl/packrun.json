@@ -878,6 +878,118 @@
       ]
     },
     {
+      "name": "init_boss_detail",
+      "docs": [
+        "Initialise the BossLocation detail sub-account for a Boss POI.",
+        "",
+        "Must be called after `init_location_from_merkle` for each Boss location."
+      ],
+      "discriminator": [
+        238,
+        184,
+        65,
+        47,
+        188,
+        11,
+        72,
+        161
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "daily_dungeon",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "location_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "poi_id_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "boss_location",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "day_id",
+          "type": "string"
+        },
+        {
+          "name": "poi_id",
+          "type": "string"
+        },
+        {
+          "name": "poi_id_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "spec",
+          "type": {
+            "defined": {
+              "name": "LocationSpecInput"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "init_daily_dungeon",
       "discriminator": [
         190,
@@ -974,6 +1086,122 @@
       ]
     },
     {
+      "name": "init_enemy_detail",
+      "docs": [
+        "Initialise the EnemyLocation detail sub-account for an Enemy POI.",
+        "",
+        "Must be called after `init_location_from_merkle` for each Enemy location.",
+        "This is a separate instruction (not combined with `init_location_from_merkle`)",
+        "to work around an Anchor v0.32.1 bug where `Option<Account>` with `init`",
+        "constraints incorrectly uses `Pubkey::default()` (SystemProgram) instead of",
+        "the `declare_id!()` program ID for PDA derivation."
+      ],
+      "discriminator": [
+        245,
+        184,
+        41,
+        11,
+        211,
+        55,
+        99,
+        57
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "daily_dungeon",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "location_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "poi_id_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "enemy_location",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "day_id",
+          "type": "string"
+        },
+        {
+          "name": "poi_id",
+          "type": "string"
+        },
+        {
+          "name": "poi_id_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "spec",
+          "type": {
+            "defined": {
+              "name": "LocationSpecInput"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "init_location_from_merkle",
       "discriminator": [
         45,
@@ -1045,85 +1273,6 @@
           }
         },
         {
-          "name": "enemy_location",
-          "writable": true,
-          "optional": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  101,
-                  110,
-                  101,
-                  109,
-                  121
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "spec.day_id"
-              },
-              {
-                "kind": "arg",
-                "path": "spec.poi_id_hash"
-              }
-            ]
-          }
-        },
-        {
-          "name": "shop_account",
-          "writable": true,
-          "optional": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  115,
-                  104,
-                  111,
-                  112
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "spec.day_id"
-              },
-              {
-                "kind": "arg",
-                "path": "spec.poi_id_hash"
-              }
-            ]
-          }
-        },
-        {
-          "name": "boss_location",
-          "writable": true,
-          "optional": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  98,
-                  111,
-                  115,
-                  115
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "spec.day_id"
-              },
-              {
-                "kind": "arg",
-                "path": "spec.poi_id_hash"
-              }
-            ]
-          }
-        },
-        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -1144,6 +1293,118 @@
               "defined": {
                 "name": "LocationMerkleProofStep"
               }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "init_shop_detail",
+      "docs": [
+        "Initialise the ShopAccount detail sub-account for a Shop POI.",
+        "",
+        "Must be called after `init_location_from_merkle` for each Shop location."
+      ],
+      "discriminator": [
+        82,
+        209,
+        160,
+        84,
+        123,
+        60,
+        25,
+        161
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "daily_dungeon",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  110,
+                  103,
+                  101,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "location_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "day_id"
+              },
+              {
+                "kind": "arg",
+                "path": "poi_id_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "shop_account",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "day_id",
+          "type": "string"
+        },
+        {
+          "name": "poi_id",
+          "type": "string"
+        },
+        {
+          "name": "poi_id_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "spec",
+          "type": {
+            "defined": {
+              "name": "LocationSpecInput"
             }
           }
         }

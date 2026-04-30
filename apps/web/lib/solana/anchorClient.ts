@@ -181,6 +181,24 @@ interface MethodBuilder {
 interface PackrunMethods {
   readonly enterDungeon: (dayId: string) => MethodBuilder;
   readonly initLocationFromMerkle: (spec: unknown, proof: unknown) => MethodBuilder;
+  readonly initEnemyDetail: (
+    dayId: string,
+    poiId: string,
+    poiIdHash: readonly number[],
+    spec: unknown,
+  ) => MethodBuilder;
+  readonly initShopDetail: (
+    dayId: string,
+    poiId: string,
+    poiIdHash: readonly number[],
+    spec: unknown,
+  ) => MethodBuilder;
+  readonly initBossDetail: (
+    dayId: string,
+    poiId: string,
+    poiIdHash: readonly number[],
+    spec: unknown,
+  ) => MethodBuilder;
   readonly initShopItemSlot: (
     dayId: string,
     poiId: string,

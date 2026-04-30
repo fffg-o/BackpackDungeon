@@ -64,27 +64,77 @@ export async function initLocationFromMerkle(
   authority: PublicKey,
 ): Promise<string> {
   const poiIdHash = sha256Bytes32(spec.id);
+  const poiIdHashArg = Array.from(poiIdHash);
+  const anchorSpec = toAnchorLocationSpec(spec, dayId);
   const [dailyDungeon] = dailyDungeonPda(dayId);
   const [locationAccount] = locationPda(dayId, poiIdHash);
   const [enemyLocation] = enemyLocationPda(dayId, poiIdHash);
   const [shopAccount] = shopPda(dayId, poiIdHash);
   const [bossLocation] = bossLocationPda(dayId, poiIdHash);
+  let signature: string | null = null;
 
-  return program.methods
-    .initLocationFromMerkle(
-      toAnchorLocationSpec(spec, dayId),
-      proof.map(toAnchorProofStep),
-    )
-    .accounts({
-      authority,
-      dailyDungeon,
-      locationAccount,
-      enemyLocation: spec.kind === LocationKind.Enemy ? enemyLocation : null,
-      shopAccount: spec.kind === LocationKind.Shop ? shopAccount : null,
-      bossLocation: spec.kind === LocationKind.Boss ? bossLocation : null,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
+  const existingLocation = await program.account.locationAccount.fetchNullable(locationAccount);
+  if (!existingLocation) {
+    signature = await program.methods
+      .initLocationFromMerkle(anchorSpec, proof.map(toAnchorProofStep))
+      .accounts({
+        authority,
+        dailyDungeon,
+        locationAccount,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+  }
+
+  if (spec.kind === LocationKind.Enemy) {
+    const existingEnemy = await program.account.enemyLocation.fetchNullable(enemyLocation);
+    if (!existingEnemy) {
+      signature = await program.methods
+        .initEnemyDetail(dayId, spec.id, poiIdHashArg, anchorSpec)
+        .accounts({
+          authority,
+          dailyDungeon,
+          locationAccount,
+          enemyLocation,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+    }
+  } else if (spec.kind === LocationKind.Shop) {
+    const existingShop = await program.account.shopAccount.fetchNullable(shopAccount);
+    if (!existingShop) {
+      signature = await program.methods
+        .initShopDetail(dayId, spec.id, poiIdHashArg, anchorSpec)
+        .accounts({
+          authority,
+          dailyDungeon,
+          locationAccount,
+          shopAccount,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+    }
+  } else if (spec.kind === LocationKind.Boss) {
+    const existingBoss = await program.account.bossLocation.fetchNullable(bossLocation);
+    if (!existingBoss) {
+      signature = await program.methods
+        .initBossDetail(dayId, spec.id, poiIdHashArg, anchorSpec)
+        .accounts({
+          authority,
+          dailyDungeon,
+          locationAccount,
+          bossLocation,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+    }
+  }
+
+  if (!signature) {
+    throw new Error("Selected location is already initialized.");
+  }
+
+  return signature;
 }
 
 export async function initShopItemSlot(

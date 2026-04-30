@@ -33,16 +33,16 @@ import idl from "../target/idl/packrun.json" with { type: "json" };
 
 const PROGRAM_ID = new PublicKey("Hj9xusyzfxP8ic9U6rmpGcY4pPGFBJQqm7BUJ4w475jU");
 
-const MASTER_SEED = "packrun-master";
-const DAY_ID = "2026-04-25";
+const RANDOM_SEED = 20_260_425;
+const DAY_ID = process.env.PACKRUN_TEST_DAY_ID ?? `test-${Date.now().toString(36).slice(-8)}`;
 
 const BASE_INPUT = Object.freeze({
   bossCount: 2,
   dayId: DAY_ID,
   enemyCount: 12,
   height: 20,
-  masterSeed: MASTER_SEED,
   poiDensity: 0.06,
+  randomSeed: RANDOM_SEED,
   shopCount: 4,
   treasureCount: 6,
   width: 30,
@@ -186,6 +186,10 @@ function toAnchorLocationSpec(spec, dayId) {
   return result;
 }
 
+function assertAnchorEnumVariant(value, variant) {
+  assert.deepEqual(value?.[variant], {});
+}
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 // Use the default Anchor provider (reads wallet from Anchor.toml config)
@@ -195,7 +199,7 @@ if (!process.env.ANCHOR_PROVIDER_URL) {
 }
 const provider = AnchorProvider.env();
 const wallet = provider.wallet;
-const program = new Program(idl, PROGRAM_ID, provider);
+const program = new Program(idl, provider);
 
 // Generate deterministic daily map once for all tests
 const dailyMap = generateDailyMap(BASE_INPUT);
@@ -212,9 +216,8 @@ const enemyLoc = dailyMap.locations.find(
 test("anchor: init daily dungeon", async () => {
   const [dungeonPda] = dailyDungeonPda(DAY_ID);
 
-  const now = Math.floor(Date.now() / 1000);
-  const startTs = new BN(now - 3600);  // 1 hour ago
-  const endTs = new BN(now + 86400);   // 24 hours from now
+  const startTs = new BN(0);
+  const endTs = new BN(4_102_444_800); // 2100-01-01
 
   // ruleset_hash: placeholder bytes32 for the ruleset
   const rulesetHash = new Uint8Array(32).fill(0);
@@ -241,11 +244,11 @@ test("anchor: init daily dungeon", async () => {
   // Fetch and verify the dungeon account
   const dungeon = await program.account.dailyDungeon.fetch(dungeonPda);
   assert.equal(dungeon.dayId, DAY_ID);
-  assert.equal(dungeon.status.open, true);
+  assertAnchorEnumVariant(dungeon.status, "open");
   assert.equal(dungeon.width, BASE_INPUT.width);
   assert.equal(dungeon.height, BASE_INPUT.height);
-  assert.equal(dungeon.locationCount, dailyMap.locations.length);
-  assert.equal(dungeon.enemyCount, BASE_INPUT.enemyCount);
+  assert.equal(dungeon.locationCount, 0);
+  assert.equal(dungeon.enemyCount, 0);
   assert.equal(dungeon.bossHp.toString(), "10000");
   assert.equal(dungeon.bossShardCount, 16);
 });
@@ -291,9 +294,17 @@ test("anchor: init location from merkle (enemy)", async () => {
       authority: wallet.publicKey,
       dailyDungeon: dungeonPda,
       locationAccount: locationPdaKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  await program.methods
+    .initEnemyDetail(DAY_ID, enemyLoc.id, poiIdHash, anchorSpec)
+    .accounts({
+      authority: wallet.publicKey,
+      dailyDungeon: dungeonPda,
+      locationAccount: locationPdaKey,
       enemyLocation: enemyPdaKey,
-      shopAccount: null,       // not a shop
-      bossLocation: null,      // not a boss
       systemProgram: SystemProgram.programId,
     })
     .rpc();
@@ -302,8 +313,8 @@ test("anchor: init location from merkle (enemy)", async () => {
   const location = await program.account.locationAccount.fetch(locationPdaKey);
   assert.equal(location.dayId, DAY_ID);
   assert.equal(location.poiId, enemyLoc.id);
-  assert.equal(location.kind.enemy, true);
-  assert.equal(location.status.available, true);
+  assertAnchorEnumVariant(location.kind, "enemy");
+  assertAnchorEnumVariant(location.status, "available");
   assert.equal(location.x, enemyLoc.position.x);
   assert.equal(location.y, enemyLoc.position.y);
 
@@ -373,12 +384,12 @@ test("anchor: clear enemy", async () => {
     `Expected next_available_at > 0, got ${enemy.nextAvailableAt}`
   );
 
-  // 3. Location account: status changed to Cleared
+  // 3. Location account remains available; cooldown is tracked on EnemyLocation
   const location = await program.account.locationAccount.fetch(locationPdaKey);
-  assert.equal(location.status.cleared, true);
+  assertAnchorEnumVariant(location.status, "available");
 
-  // 4. Daily dungeon: location_count and enemy_count unchanged (they track total, not cleared)
+  // 4. Daily dungeon: initialized account counters remain unchanged by clearing
   const dungeon = await program.account.dailyDungeon.fetch(dungeonPda);
-  assert.equal(dungeon.locationCount, dailyMap.locations.length);
-  assert.equal(dungeon.enemyCount, BASE_INPUT.enemyCount);
+  assert.equal(dungeon.locationCount, 1);
+  assert.equal(dungeon.enemyCount, 1);
 });

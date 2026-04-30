@@ -39,14 +39,14 @@ import { simulateBattle } from "../apps/web/app/dungeon/battle-sim.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const MASTER_SEED = "packrun-master";
+const RANDOM_SEED = 20_260_425;
 const BASE_INPUT = Object.freeze({
   bossCount: 2,
   dayId: "2026-04-25",
   enemyCount: 12,
   height: 20,
-  masterSeed: MASTER_SEED,
   poiDensity: 0.06,
+  randomSeed: RANDOM_SEED,
   shopCount: 4,
   treasureCount: 6,
   width: 30,
@@ -100,9 +100,9 @@ test("daily map is deterministic for same input", () => {
   }
 });
 
-test("daily map changes with different master seed", () => {
+test("daily map changes with different random seed", () => {
   const a = generateDailyMap(BASE_INPUT);
-  const b = generateDailyMap({ ...BASE_INPUT, masterSeed: "different-seed" });
+  const b = generateDailyMap({ ...BASE_INPUT, randomSeed: RANDOM_SEED + 1 });
   assert.notEqual(a.seedHash, b.seedHash);
 });
 
@@ -271,7 +271,7 @@ test("merkle proof fails for modified config hash", () => {
 
 test("merkle proof fails with wrong root", () => {
   const map = generateDailyMap(BASE_INPUT);
-  const otherMap = generateDailyMap({ ...BASE_INPUT, masterSeed: "other-seed" });
+  const otherMap = generateDailyMap({ ...BASE_INPUT, randomSeed: RANDOM_SEED + 2 });
   const spec = map.locations[2];
   const proof = getLocationProof(map.locations, spec.id);
   const otherTree = buildLocationMerkleTree(otherMap.locations);
@@ -344,7 +344,7 @@ test("enemy reward computation returns valid structure", () => {
   const enemy = map.locations.find((l) => l.kind === LocationKind.Enemy && l.enemy);
   assert.ok(enemy?.enemy);
 
-  const reward = computeEnemyReward(MASTER_SEED, enemy, 0, {
+  const reward = computeEnemyReward(RANDOM_SEED, enemy, 0, {
     damageTaken: 15,
     flawless: false,
     turnsTaken: 6,
@@ -362,13 +362,13 @@ test("flawless victory gives better rewards", () => {
   const enemy = map.locations.find((l) => l.kind === LocationKind.Enemy && l.enemy);
   assert.ok(enemy?.enemy);
 
-  const normal = computeEnemyReward(MASTER_SEED, enemy, 0, {
+  const normal = computeEnemyReward(RANDOM_SEED, enemy, 0, {
     damageTaken: 30,
     flawless: false,
     turnsTaken: 8,
   });
 
-  const flawless = computeEnemyReward(MASTER_SEED, enemy, 0, {
+  const flawless = computeEnemyReward(RANDOM_SEED, enemy, 0, {
     damageTaken: 0,
     flawless: true,
     turnsTaken: 3,
@@ -675,33 +675,33 @@ test("mock cnft adapter mints daily reward nft", async () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 test("deriveSeed produces deterministic output", () => {
-  const a = deriveSeed(MASTER_SEED, "day-1");
-  const b = deriveSeed(MASTER_SEED, "day-1");
+  const a = deriveSeed(RANDOM_SEED, "day-1");
+  const b = deriveSeed(RANDOM_SEED, "day-1");
   assert.equal(a, b);
 });
 
 test("deriveSeed changes with different inputs", () => {
-  const a = deriveSeed(MASTER_SEED, "day-1");
-  const b = deriveSeed(MASTER_SEED, "day-2");
+  const a = deriveSeed(RANDOM_SEED, "day-1");
+  const b = deriveSeed(RANDOM_SEED, "day-2");
   assert.notEqual(a, b);
 });
 
 test("randomU32 returns values in valid range", () => {
   for (let i = 0; i < 100; i++) {
-    const val = randomU32(MASTER_SEED, i);
+    const val = randomU32(RANDOM_SEED, i);
     assert.ok(val >= 0);
     assert.ok(val <= 0xffffffff);
   }
 });
 
 test("randomU32 is deterministic", () => {
-  assert.equal(randomU32(MASTER_SEED, 0), randomU32(MASTER_SEED, 0));
-  assert.equal(randomU32(MASTER_SEED, 42), randomU32(MASTER_SEED, 42));
+  assert.equal(randomU32(RANDOM_SEED, 0), randomU32(RANDOM_SEED, 0));
+  assert.equal(randomU32(RANDOM_SEED, 42), randomU32(RANDOM_SEED, 42));
 });
 
 test("randomRange returns values within bounds", () => {
   for (let i = 0; i < 50; i++) {
-    const val = randomRange(MASTER_SEED, i, 10, 20);
+    const val = randomRange(RANDOM_SEED, i, 10, 20);
     assert.ok(val >= 10);
     assert.ok(val <= 20);
   }
@@ -716,7 +716,7 @@ test("pickWeighted selects from weighted items", () => {
 
   const results = new Set();
   for (let i = 0; i < 200; i++) {
-    const picked = pickWeighted(MASTER_SEED, i, items);
+    const picked = pickWeighted(RANDOM_SEED, i, items);
     results.add(picked);
   }
 
@@ -731,8 +731,8 @@ test("pickWeighted is deterministic", () => {
     { item: "legendary", weight: 5 },
   ];
 
-  const a = pickWeighted(MASTER_SEED, 42, items);
-  const b = pickWeighted(MASTER_SEED, 42, items);
+  const a = pickWeighted(RANDOM_SEED, 42, items);
+  const b = pickWeighted(RANDOM_SEED, 42, items);
   assert.equal(a.item, b.item);
 });
 
@@ -762,7 +762,7 @@ test("full flow: generate -> merkle -> verify -> battle -> clear -> reward", () 
   assert.ok(typeof battleResult.won === "boolean");
 
   // 6. Compute reward
-  const reward = computeEnemyReward(MASTER_SEED, enemyLoc, 0, {
+  const reward = computeEnemyReward(RANDOM_SEED, enemyLoc, 0, {
     damageTaken: battleResult.damageTaken,
     flawless: battleResult.flawless,
     turnsTaken: battleResult.turnsTaken,

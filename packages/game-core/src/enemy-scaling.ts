@@ -4,7 +4,7 @@ import type {
   EnemyConfig,
   LocationSpec
 } from "@backpack-dungeon/shared";
-import { deriveSeed, randomRange } from "./rng.js";
+import { deriveSeed, randomRange, type SeedSource } from "./rng.js";
 
 export interface EnemyScalingConfig extends EnemyConfig {
   readonly baseCooldownSeconds?: number;
@@ -120,7 +120,7 @@ export function computeEnemyRewardTier(
 }
 
 export function computeEnemyReward(
-  seed: string,
+  seed: SeedSource,
   enemySpec: EnemyRewardSpec,
   clearCount: number,
   playerPerformance: EnemyRewardPlayerPerformance = {}

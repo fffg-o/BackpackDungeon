@@ -6,8 +6,11 @@ import { WalletButton } from "./wallet-button";
 import {
   buildLocationMerkleTree,
   computeBossDamage,
+  createDailyMapInput,
   generateDailyMap,
   getLocationProof,
+  parseDailyMapRandomSeed,
+  todayDayId,
   type DailyLocationSpec,
   type DailyMapInput,
 } from "@backpack-dungeon/game-core";
@@ -38,7 +41,7 @@ import { simulateBattle, type BattleResult } from "./battle-sim";
 import styles from "./dungeon.module.css";
 
 const ENABLE_MANUAL_POI_INIT =
-  process.env.NEXT_PUBLIC_ENABLE_MANUAL_POI_INIT === "false";
+  process.env.NEXT_PUBLIC_ENABLE_MANUAL_POI_INIT !== "false";
 
 interface PoiDetail {
   readonly spec: DailyLocationSpec;
@@ -90,18 +93,10 @@ type TxPending =
   | `initShopSlot:${number}`
   | `buyItem:${number}`;
 
-const MASTER_SEED = "packrun-master";
-const MAP_INPUT: DailyMapInput = {
-  bossCount: 2,
-  dayId: new Date().toISOString().slice(0, 10),
-  enemyCount: 12,
-  height: 20,
-  masterSeed: MASTER_SEED,
-  poiDensity: 0.06,
-  shopCount: 4,
-  treasureCount: 6,
-  width: 30,
-};
+const MAP_INPUT: DailyMapInput = createDailyMapInput({
+  dayId: process.env.NEXT_PUBLIC_PACKRUN_DAY_ID || todayDayId(),
+  randomSeed: parseDailyMapRandomSeed(process.env.NEXT_PUBLIC_PACKRUN_RANDOM_SEED),
+});
 
 const ENEMY_CLEAR_ENERGY_COST = 5;
 const EXPLORER_CLUSTER = "devnet";

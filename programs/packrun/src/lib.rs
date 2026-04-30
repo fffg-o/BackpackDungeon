@@ -687,12 +687,16 @@ fn create_pda_account<'info>(
     space: usize,
     program_id: &Pubkey,
 ) -> Result<u8> {
-    let seeds: &[&[u8]] = &[seed_prefix, day_id.as_bytes(), poi_id_hash.as_ref()];
+    let day_id_bytes = day_id.as_bytes();
+    let seeds: &[&[u8]] = &[seed_prefix, day_id_bytes, poi_id_hash.as_ref()];
     let (pda, bump) = Pubkey::find_program_address(seeds, program_id);
     require_eq!(pda, target.key(), PackrunError::InvalidEnemyLocation);
 
     let lamports = Rent::get()?.minimum_balance(space);
     let account_size = space as u64;
+    let bump_seed = [bump];
+    let signer_seeds: &[&[&[u8]]] =
+        &[&[seed_prefix, day_id_bytes, poi_id_hash.as_ref(), &bump_seed]];
 
     anchor_lang::system_program::create_account(
         CpiContext::new(
@@ -701,7 +705,8 @@ fn create_pda_account<'info>(
                 from: authority.to_account_info(),
                 to: target.to_account_info(),
             },
-        ),
+        )
+        .with_signer(signer_seeds),
         lamports,
         account_size,
         program_id,

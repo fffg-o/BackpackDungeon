@@ -16,8 +16,8 @@ const BASE_INPUT: DailyMapInput = Object.freeze({
   dayId: "2026-04-25",
   enemyCount: 8,
   height: 40,
-  masterSeed: "packrun-master",
   poiDensity: 0.05,
+  randomSeed: 20_260_425,
   shopCount: 3,
   treasureCount: 5,
   width: 50
@@ -74,7 +74,7 @@ test("wrong root fails", () => {
   const wrongRoot = buildLocationMerkleTree(
     generateDailyMap({
       ...BASE_INPUT,
-      masterSeed: "packrun-other-master"
+      randomSeed: 20_260_426
     }).locations
   ).root;
 

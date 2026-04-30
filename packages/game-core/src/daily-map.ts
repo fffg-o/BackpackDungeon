@@ -13,9 +13,12 @@ import type {
   ShopItemSlot
 } from "@backpack-dungeon/shared";
 import {
+  assertRandomSeed,
   deriveSeed,
+  masterSeedFromRandomSeed,
   pickWeighted,
   randomRange,
+  type SeedSource,
   type WeightedItem
 } from "./rng.js";
 
@@ -27,7 +30,7 @@ export type DailyPoiKind =
 
 export interface DailyMapInput {
   readonly dayId: DayId;
-  readonly masterSeed: string;
+  readonly randomSeed: number;
   readonly width: number;
   readonly height: number;
   readonly poiDensity: number;
@@ -44,6 +47,7 @@ export interface DailyLocationSpec extends Omit<LocationSpec, "kind"> {
 
 export interface DailyMap {
   readonly dayId: DayId;
+  readonly randomSeed: number;
   readonly seedHash: string;
   readonly width: number;
   readonly height: number;
@@ -112,12 +116,14 @@ export function generateDailyMap(input: DailyMapInput): DailyMap {
   const treasureCount = assertNonNegativeInteger(input.treasureCount, "treasureCount");
   const area = assertSafeArea(width, height);
   const totalPoiCount = bossCount + shopCount + enemyCount + treasureCount;
+  const randomSeed = assertRandomSeed(input.randomSeed, "randomSeed");
+  const masterSeed = masterSeedFromRandomSeed(randomSeed);
 
   if (totalPoiCount > area) {
     throw new RangeError("POI count cannot exceed map area.");
   }
 
-  const rootSeed = deriveSeed(input.masterSeed, "daily-map", input.dayId);
+  const rootSeed = deriveSeed(masterSeed, "daily-map", input.dayId);
   const layoutSeed = deriveSeed(
     rootSeed,
     "poi-layout",
@@ -174,6 +180,7 @@ export function generateDailyMap(input: DailyMapInput): DailyMap {
     height,
     locations,
     poiDensity: input.poiDensity,
+    randomSeed,
     seedHash: deriveSeed(
       rootSeed,
       "daily-map-seed-hash",
@@ -294,7 +301,7 @@ function pickOpenPosition(
 }
 
 export function findOpenPosition(
-  seed: string,
+  seed: SeedSource,
   width: number,
   height: number,
   occupied: Set<string>

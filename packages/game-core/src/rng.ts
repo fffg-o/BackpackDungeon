@@ -2,6 +2,7 @@ import type { CanonicalJsonValue } from "@backpack-dungeon/shared";
 import { hashCanonicalJson } from "@backpack-dungeon/shared";
 
 export type SeedPart = CanonicalJsonValue;
+export type SeedSource = string | number;
 
 export interface WeightedItem<T> {
   readonly item: T;
@@ -11,28 +12,28 @@ export interface WeightedItem<T> {
 const UINT32_SIZE = 0x1_0000_0000;
 
 export function deriveSeed(
-  masterSeed: string,
+  masterSeed: SeedSource,
   domain: string,
   ...parts: readonly SeedPart[]
 ): string {
-  assertString(masterSeed, "masterSeed");
+  const normalizedMasterSeed = seedSourceToString(masterSeed, "masterSeed");
   assertString(domain, "domain");
 
   return hashCanonicalJson({
     domain,
-    masterSeed,
+    masterSeed: normalizedMasterSeed,
     parts,
     version: 1
   });
 }
 
-export function randomU32(seed: string, index: number): number {
-  assertString(seed, "seed");
+export function randomU32(seed: SeedSource, index: number): number {
+  const normalizedSeed = seedSourceToString(seed, "seed");
   assertNonNegativeInteger(index, "index");
 
   const digest = hashCanonicalJson({
     index,
-    seed,
+    seed: normalizedSeed,
     version: 1
   });
 
@@ -40,12 +41,12 @@ export function randomU32(seed: string, index: number): number {
 }
 
 export function randomRange(
-  seed: string,
+  seed: SeedSource,
   index: number,
   min: number,
   max: number
 ): number {
-  assertString(seed, "seed");
+  const normalizedSeed = seedSourceToString(seed, "seed");
   assertNonNegativeInteger(index, "index");
   assertSafeInteger(min, "min");
   assertSafeInteger(max, "max");
@@ -63,7 +64,7 @@ export function randomRange(
     return min;
   }
 
-  const rangeSeed = deriveSeed(seed, "random-range", index, min, max);
+  const rangeSeed = deriveSeed(normalizedSeed, "random-range", index, min, max);
   const bucketSize = Math.floor(UINT32_SIZE / span);
   const limit = bucketSize * span;
 
@@ -76,11 +77,11 @@ export function randomRange(
 }
 
 export function pickWeighted<T>(
-  seed: string,
+  seed: SeedSource,
   index: number,
   weightedItems: readonly WeightedItem<T>[]
 ): T {
-  assertString(seed, "seed");
+  const normalizedSeed = seedSourceToString(seed, "seed");
   assertNonNegativeInteger(index, "index");
 
   if (weightedItems.length === 0) {
@@ -96,7 +97,7 @@ export function pickWeighted<T>(
     }
   }
 
-  const roll = randomRange(seed, index, 1, totalWeight);
+  const roll = randomRange(normalizedSeed, index, 1, totalWeight);
   let cursor = 0;
   for (const entry of weightedItems) {
     cursor += entry.weight;
@@ -106,6 +107,31 @@ export function pickWeighted<T>(
   }
 
   return weightedItems[weightedItems.length - 1].item;
+}
+
+export function masterSeedFromRandomSeed(randomSeed: number): string {
+  return hashCanonicalJson({
+    domain: "packrun-random-seed",
+    randomSeed: assertRandomSeed(randomSeed, "randomSeed"),
+    version: 1
+  });
+}
+
+export function seedSourceToString(seed: SeedSource, name = "seed"): string {
+  if (typeof seed === "number") {
+    return masterSeedFromRandomSeed(seed);
+  }
+
+  assertString(seed, name);
+  return seed;
+}
+
+export function assertRandomSeed(value: number, name = "randomSeed"): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative safe integer.`);
+  }
+
+  return value;
 }
 
 function assertString(value: string, name: string): void {

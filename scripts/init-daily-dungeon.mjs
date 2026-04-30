@@ -14,11 +14,19 @@
 // Environment:
 //   ANCHOR_WALLET          — path to the deployer keypair (default: ~/.config/solana/id.json)
 //   ANCHOR_PROVIDER_URL    — Solana RPC URL (default: http://127.0.0.1:8899)
+//   PACKRUN_DAY_ID         — optional YYYY-MM-DD override
+//   PACKRUN_RANDOM_SEED    — optional numeric random seed for map generation
 // ──────────────────────────────────────────────────────────────────────────────
 
 import anchor from "@coral-xyz/anchor";
 import solanaWeb3 from "@solana/web3.js";
-import { generateDailyMap, buildLocationMerkleTree } from "@backpack-dungeon/game-core";
+import {
+  buildLocationMerkleTree,
+  createDailyMapInput,
+  generateDailyMap,
+  parseDailyMapRandomSeed,
+  todayDayId,
+} from "@backpack-dungeon/game-core";
 import idl from "../target/idl/packrun.json" with { type: "json" };
 
 const { AnchorProvider, Program, BN } = anchor;
@@ -27,23 +35,14 @@ const { PublicKey, SystemProgram } = solanaWeb3;
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const PROGRAM_ID = new PublicKey("Hj9xusyzfxP8ic9U6rmpGcY4pPGFBJQqm7BUJ4w475jU");
-const MASTER_SEED = "packrun-master";
 
-// Get today's date in YYYY-MM-DD format (UTC)
-const TODAY = new Date();
-const DAY_ID = TODAY.toISOString().slice(0, 10);
+const DAY_ID = process.env.PACKRUN_DAY_ID ?? todayDayId();
+const RANDOM_SEED = parseDailyMapRandomSeed(process.env.PACKRUN_RANDOM_SEED);
 
-const BASE_INPUT = Object.freeze({
-  bossCount: 2,
+const MAP_INPUT = Object.freeze(createDailyMapInput({
   dayId: DAY_ID,
-  enemyCount: 12,
-  height: 20,
-  masterSeed: MASTER_SEED,
-  poiDensity: 0.06,
-  shopCount: 4,
-  treasureCount: 6,
-  width: 30,
-});
+  randomSeed: RANDOM_SEED,
+}));
 
 // PDA seed constants (must match programs/packrun/src/lib.rs)
 const DAILY_DUNGEON_SEED = Buffer.from("dungeon");
@@ -60,6 +59,35 @@ function hexToBytes32(hex) {
   return bytes;
 }
 
+function bytesToHex(bytes) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function assertExistingDungeonMatchesMap(dungeon, expectedRoot) {
+  const onChainRoot = bytesToHex(dungeon.mapRoot);
+  const mismatches = [];
+
+  if (onChainRoot !== expectedRoot) {
+    mismatches.push(`mapRoot on-chain=${onChainRoot} local=${expectedRoot}`);
+  }
+  if (dungeon.width !== MAP_INPUT.width || dungeon.height !== MAP_INPUT.height) {
+    mismatches.push(
+      `dimensions on-chain=${dungeon.width}x${dungeon.height} local=${MAP_INPUT.width}x${MAP_INPUT.height}`,
+    );
+  }
+
+  if (mismatches.length > 0) {
+    throw new Error(
+      [
+        `DailyDungeon for ${DAY_ID} already exists, but it was initialized with different map data.`,
+        ...mismatches,
+        `Current local config: PACKRUN_DAY_ID=${DAY_ID}, PACKRUN_RANDOM_SEED=${RANDOM_SEED}.`,
+        "Use the same PACKRUN_RANDOM_SEED/PACKRUN_DAY_ID as the existing account, or reset the local validator/ledger before reinitializing this day.",
+      ].join("\n"),
+    );
+  }
+}
+
 /** Derive a PDA for the daily dungeon account. */
 function dailyDungeonPda(dayId) {
   return PublicKey.findProgramAddressSync(
@@ -71,10 +99,10 @@ function dailyDungeonPda(dayId) {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log(`[INIT] Generating daily map for dayId: ${DAY_ID}...`);
+  console.log(`[INIT] Generating daily map for dayId: ${DAY_ID} with seed ${RANDOM_SEED}...`);
 
   // 1. Generate deterministic daily map
-  const dailyMap = generateDailyMap(BASE_INPUT);
+  const dailyMap = generateDailyMap(MAP_INPUT);
   console.log(`[INIT] Map generated: ${dailyMap.locations.length} locations`);
 
   // 2. Build Merkle tree and extract root hash
@@ -99,16 +127,13 @@ async function main() {
   console.log(`[INIT] DailyDungeon PDA: ${dungeonPda.toBase58()}`);
 
   // 5. Check if already initialized
-  try {
-    const existing = await program.account.dailyDungeon.fetch(dungeonPda);
-    if (existing && existing.dayId === DAY_ID) {
-      console.log(
-        `[INIT] DailyDungeon for ${DAY_ID} already initialized, skipping.`,
-      );
-      return;
-    }
-  } catch {
-    // Account not found — proceed to initialize
+  const existing = await program.account.dailyDungeon.fetchNullable(dungeonPda);
+  if (existing) {
+    assertExistingDungeonMatchesMap(existing, merkleTree.root);
+    console.log(
+      `[INIT] DailyDungeon for ${DAY_ID} already initialized with matching map root, skipping.`,
+    );
+    return;
   }
 
   // 6. Prepare time window (1 hour ago → 24 hours from now)
@@ -127,8 +152,8 @@ async function main() {
       DAY_ID,
       mapRoot,
       Array.from(rulesetHash),
-      BASE_INPUT.width,
-      BASE_INPUT.height,
+      MAP_INPUT.width,
+      MAP_INPUT.height,
       startTs,
       endTs,
       new BN(10_000), // boss_hp

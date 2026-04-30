@@ -26,6 +26,7 @@ BackpackDungeon/
 │   ├── game-core/                    # 确定性游戏逻辑引擎
 │   │   ├── src/
 │   │   │   ├── boss-shards.ts       # BOSS 碎片逻辑
+│   │   │   ├── daily-config.ts      # 每日地图默认参数和数字随机种子配置
 │   │   │   ├── daily-map.ts         # 每日地图生成
 │   │   │   ├── enemy-scaling.ts     # 敌人属性缩放
 │   │   │   ├── location-merkle.ts   # 位置 Merkle 树
@@ -100,6 +101,15 @@ NO_DNA=1 anchor test
 # 清理构建产物
 ./start.sh --clean
 ```
+
+每日地图的所有随机结果都从一个数字种子派生。默认值在 `packages/game-core/src/daily-config.ts` 中维护，也可以启动时覆盖：
+
+```bash
+PACKRUN_RANDOM_SEED=123456 ./start.sh
+PACKRUN_DAY_ID=2026-04-26 PACKRUN_RANDOM_SEED=123456 ./start.sh
+```
+
+`start.sh` 会用同一组配置初始化链上账户并启动 Web 前端，避免地图和 Merkle root 不一致。
 
 ### 启动 Web 前端（单独）
 

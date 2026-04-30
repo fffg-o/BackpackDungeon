@@ -15,11 +15,20 @@
 // Environment:
 //   ANCHOR_WALLET          — path to the deployer keypair (default: ~/.config/solana/id.json)
 //   ANCHOR_PROVIDER_URL    — Solana RPC URL (default: http://127.0.0.1:8899)
+//   PACKRUN_DAY_ID         — optional YYYY-MM-DD override
+//   PACKRUN_RANDOM_SEED    — optional numeric random seed for map generation
 // ──────────────────────────────────────────────────────────────────────────────
 
 import anchor from "@coral-xyz/anchor";
 import solanaWeb3 from "@solana/web3.js";
-import { generateDailyMap, buildLocationMerkleTree, getLocationProof } from "@backpack-dungeon/game-core";
+import {
+  buildLocationMerkleTree,
+  createDailyMapInput,
+  generateDailyMap,
+  getLocationProof,
+  parseDailyMapRandomSeed,
+  todayDayId,
+} from "@backpack-dungeon/game-core";
 import { LocationKind } from "@backpack-dungeon/shared";
 import { createHash } from "node:crypto";
 import idl from "../target/idl/packrun.json" with { type: "json" };
@@ -31,22 +40,14 @@ const { PublicKey, SystemProgram } = solanaWeb3;
 // Must match scripts/init-daily-dungeon.mjs and programs/packrun/src/lib.rs
 
 const PROGRAM_ID = new PublicKey("Hj9xusyzfxP8ic9U6rmpGcY4pPGFBJQqm7BUJ4w475jU");
-const MASTER_SEED = "packrun-master";
 
-const TODAY = new Date();
-const DAY_ID = TODAY.toISOString().slice(0, 10);
+const DAY_ID = process.env.PACKRUN_DAY_ID ?? todayDayId();
+const RANDOM_SEED = parseDailyMapRandomSeed(process.env.PACKRUN_RANDOM_SEED);
 
-const BASE_INPUT = Object.freeze({
-  bossCount: 2,
+const MAP_INPUT = Object.freeze(createDailyMapInput({
   dayId: DAY_ID,
-  enemyCount: 12,
-  height: 20,
-  masterSeed: MASTER_SEED,
-  poiDensity: 0.06,
-  shopCount: 4,
-  treasureCount: 6,
-  width: 30,
-});
+  randomSeed: RANDOM_SEED,
+}));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,35 @@ function hexToBytes32(hex) {
     bytes[i] = Number.parseInt(normalized.slice(i * 2, i * 2 + 2), 16);
   }
   return bytes;
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function assertDungeonMatchesMap(dungeon, expectedRoot) {
+  const onChainRoot = bytesToHex(dungeon.mapRoot);
+  const mismatches = [];
+
+  if (onChainRoot !== expectedRoot) {
+    mismatches.push(`mapRoot on-chain=${onChainRoot} local=${expectedRoot}`);
+  }
+  if (dungeon.width !== MAP_INPUT.width || dungeon.height !== MAP_INPUT.height) {
+    mismatches.push(
+      `dimensions on-chain=${dungeon.width}x${dungeon.height} local=${MAP_INPUT.width}x${MAP_INPUT.height}`,
+    );
+  }
+
+  if (mismatches.length > 0) {
+    throw new Error(
+      [
+        `DailyDungeon for ${DAY_ID} does not match the generated map, so Merkle proofs would be invalid.`,
+        ...mismatches,
+        `Current local config: PACKRUN_DAY_ID=${DAY_ID}, PACKRUN_RANDOM_SEED=${RANDOM_SEED}.`,
+        "Use the same PACKRUN_RANDOM_SEED/PACKRUN_DAY_ID as the existing account, or reset the local validator/ledger before reinitializing this day.",
+      ].join("\n"),
+    );
+  }
 }
 
 /** SHA-256 hash as raw 32-byte Uint8Array (Node.js built-in crypto). */
@@ -171,13 +201,90 @@ function toAnchorProofStep(step) {
   };
 }
 
+async function ensureDetailAccount({
+  anchorSpec,
+  dailyDungeon,
+  locationAccount,
+  poiIdHash,
+  program,
+  spec,
+  wallet,
+}) {
+  const commonAccounts = {
+    authority: wallet.publicKey,
+    dailyDungeon,
+    locationAccount,
+    systemProgram: SystemProgram.programId,
+  };
+  const poiIdHashArg = Array.from(poiIdHash);
+
+  if (spec.kind === LocationKind.Enemy) {
+    const [enemyAddress] = enemyLocationPda(DAY_ID, poiIdHash);
+    const existing = await program.account.enemyLocation.fetchNullable(enemyAddress);
+    if (existing) {
+      console.log("[CRANK]   EnemyLocation exists");
+      return null;
+    }
+
+    const detailTx = await program.methods
+      .initEnemyDetail(DAY_ID, spec.id, poiIdHashArg, anchorSpec)
+      .accounts({
+        ...commonAccounts,
+        enemyLocation: enemyAddress,
+      })
+      .rpc();
+    console.log(`[CRANK]   EnemyLocation created: ${detailTx}`);
+    return detailTx;
+  }
+
+  if (spec.kind === LocationKind.Shop) {
+    const [shopAddress] = shopPda(DAY_ID, poiIdHash);
+    const existing = await program.account.shopAccount.fetchNullable(shopAddress);
+    if (existing) {
+      console.log("[CRANK]   ShopAccount exists");
+      return null;
+    }
+
+    const detailTx = await program.methods
+      .initShopDetail(DAY_ID, spec.id, poiIdHashArg, anchorSpec)
+      .accounts({
+        ...commonAccounts,
+        shopAccount: shopAddress,
+      })
+      .rpc();
+    console.log(`[CRANK]   ShopAccount created: ${detailTx}`);
+    return detailTx;
+  }
+
+  if (spec.kind === LocationKind.Boss) {
+    const [bossAddress] = bossLocationPda(DAY_ID, poiIdHash);
+    const existing = await program.account.bossLocation.fetchNullable(bossAddress);
+    if (existing) {
+      console.log("[CRANK]   BossLocation exists");
+      return null;
+    }
+
+    const detailTx = await program.methods
+      .initBossDetail(DAY_ID, spec.id, poiIdHashArg, anchorSpec)
+      .accounts({
+        ...commonAccounts,
+        bossLocation: bossAddress,
+      })
+      .rpc();
+    console.log(`[CRANK]   BossLocation created: ${detailTx}`);
+    return detailTx;
+  }
+
+  return null;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log(`[CRANK] Initialising all locations for dayId: ${DAY_ID}...`);
+  console.log(`[CRANK] Initialising all locations for dayId: ${DAY_ID} with seed ${RANDOM_SEED}...`);
 
   // 1. Generate deterministic daily map (same input as init-daily-dungeon.mjs)
-  const dailyMap = generateDailyMap(BASE_INPUT);
+  const dailyMap = generateDailyMap(MAP_INPUT);
   console.log(`[CRANK] Map generated: ${dailyMap.locations.length} locations`);
 
   // 2. Build Merkle tree (we only need it to verify the root)
@@ -206,11 +313,14 @@ async function main() {
     );
   }
   console.log(`[CRANK] DailyDungeon: ${dungeonPda.toBase58()}`);
+  assertDungeonMatchesMap(dungeon, merkleTree.root);
+  console.log("[CRANK] On-chain DailyDungeon map root matches generated map");
 
   // 5. Iterate all POIs, skip already-initialised accounts, init missing ones
   const locations = dailyMap.locations;
-  let initialized = 0;
-  let skipped = 0;
+  let baseInitialized = 0;
+  let detailInitialized = 0;
+  let complete = 0;
   let errors = 0;
 
   for (let i = 0; i < locations.length; i++) {
@@ -218,19 +328,8 @@ async function main() {
     const poiIdHash = sha256Bytes32(spec.id);
     const [locationAddress] = locationPda(DAY_ID, poiIdHash);
 
-    // Check if this LocationAccount PDA already exists on-chain
-    const existing = await program.account.locationAccount.fetchNullable(locationAddress);
-    if (existing) {
-      console.log(
-        `[CRANK] [${i + 1}/${locations.length}] SKIP ${spec.id} ` +
-          `(${spec.kind}) — already initialized`,
-      );
-      skipped++;
-      continue;
-    }
-
     console.log(
-      `[CRANK] [${i + 1}/${locations.length}] INIT ${spec.id} ` +
+      `[CRANK] [${i + 1}/${locations.length}] CHECK ${spec.id} ` +
         `(${spec.kind}) at (${spec.position.x}, ${spec.position.y})...`,
     );
 
@@ -241,71 +340,44 @@ async function main() {
       // Build Anchor-compatible inputs
       const anchorSpec = toAnchorLocationSpec(spec, DAY_ID);
       const anchorProof = proof.map(toAnchorProofStep);
+      const existingLocation = await program.account.locationAccount.fetchNullable(locationAddress);
 
-      // 1. Create the LocationAccount (no detail sub-accounts — they are
-      //    created in separate instructions to work around an Anchor v0.32.1
-      //    bug where Option<Account> with init uses SystemProgram for PDA
-      //    derivation instead of the correct program ID).
-      const txSig = await program.methods
-        .initLocationFromMerkle(anchorSpec, anchorProof)
-        .accounts({
-          authority: wallet.publicKey,
-          dailyDungeon: dungeonPda,
-          locationAccount: locationAddress,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-
-      console.log(`[CRANK]   ✅ LocationAccount created: ${txSig}`);
-
-      // 2. Create the detail sub-account depending on location kind.
-      //    We pass day_id, poi_id, poi_id_hash as separate instruction args
-      //    (these are used in the #[instruction] attribute for seed derivation)
-      //    and the full anchorSpec as an additional data-only arg.
-      if (spec.kind === LocationKind.Enemy) {
-        const [, enemyPda] = enemyLocationPda(DAY_ID, poiIdHash);
-        const detailTx = await program.methods
-          .initEnemyDetail(DAY_ID, spec.id, Array.from(poiIdHash), anchorSpec)
+      if (existingLocation) {
+        console.log("[CRANK]   LocationAccount exists");
+      } else {
+        // 1. Create the LocationAccount. Detail sub-accounts are created by
+        //    separate idempotent checks below, so reruns can repair partial init.
+        const txSig = await program.methods
+          .initLocationFromMerkle(anchorSpec, anchorProof)
           .accounts({
             authority: wallet.publicKey,
             dailyDungeon: dungeonPda,
             locationAccount: locationAddress,
-            enemyLocation: enemyPda,
             systemProgram: SystemProgram.programId,
           })
           .rpc();
-        console.log(`[CRANK]   ✅ EnemyLocation created: ${detailTx}`);
-      } else if (spec.kind === LocationKind.Shop) {
-        const [, shopPdaAddr] = shopPda(DAY_ID, poiIdHash);
-        const detailTx = await program.methods
-          .initShopDetail(DAY_ID, spec.id, Array.from(poiIdHash), anchorSpec)
-          .accounts({
-            authority: wallet.publicKey,
-            dailyDungeon: dungeonPda,
-            locationAccount: locationAddress,
-            shopAccount: shopPdaAddr,
-            systemProgram: SystemProgram.programId,
-          })
-          .rpc();
-        console.log(`[CRANK]   ✅ ShopAccount created: ${detailTx}`);
-      } else if (spec.kind === LocationKind.Boss) {
-        const [, bossPdaAddr] = bossLocationPda(DAY_ID, poiIdHash);
-        const detailTx = await program.methods
-          .initBossDetail(DAY_ID, spec.id, Array.from(poiIdHash), anchorSpec)
-          .accounts({
-            authority: wallet.publicKey,
-            dailyDungeon: dungeonPda,
-            locationAccount: locationAddress,
-            bossLocation: bossPdaAddr,
-            systemProgram: SystemProgram.programId,
-          })
-          .rpc();
-        console.log(`[CRANK]   ✅ BossLocation created: ${detailTx}`);
+
+        console.log(`[CRANK]   LocationAccount created: ${txSig}`);
+        baseInitialized++;
       }
 
-      initialized++;
+      const detailTx = await ensureDetailAccount({
+        anchorSpec,
+        dailyDungeon: dungeonPda,
+        locationAccount: locationAddress,
+        poiIdHash,
+        program,
+        spec,
+        wallet,
+      });
+
+      if (detailTx) {
+        detailInitialized++;
+      }
+
+      complete++;
     } catch (error) {
-      console.error(`[CRANK]   ❌ Error: ${error.message}`);
+      console.error(`[CRANK]   Error: ${error.message}`);
       errors++;
     }
   }
@@ -316,18 +388,19 @@ async function main() {
   console.log(`  CRANK SUMMARY for ${DAY_ID}`);
   console.log(`${"═".repeat(56)}`);
   console.log(`  Total POIs:      ${total}`);
-  console.log(`  Initialized:     ${initialized}`);
-  console.log(`  Skipped (exist): ${skipped}`);
+  console.log(`  Complete:        ${complete}`);
+  console.log(`  Base created:    ${baseInitialized}`);
+  console.log(`  Detail created:  ${detailInitialized}`);
   console.log(`  Errors:          ${errors}`);
-  if (initialized + skipped + errors === total) {
-    console.log(`  Status:          ✅ All locations accounted for`);
+  if (complete + errors === total) {
+    console.log(`  Status:          All locations accounted for`);
   } else {
-    console.log(`  Status:          ⚠️  Mismatch (unexpected)`);
+    console.log(`  Status:          Mismatch (unexpected)`);
   }
   console.log(`${"═".repeat(56)}`);
 
   if (errors > 0) {
-    console.warn(`\n[CRANK] ${errors} location(s) failed — check logs above.`);
+    console.warn(`\n[CRANK] ${errors} location(s) failed - check logs above.`);
     // Exit with code 0 so start.sh doesn't abort; crank can be re-run.
   }
 }

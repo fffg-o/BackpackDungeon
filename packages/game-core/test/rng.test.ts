@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   deriveSeed,
+  masterSeedFromRandomSeed,
   pickWeighted,
   randomRange,
   randomU32,
@@ -42,6 +43,14 @@ test("different domain produces an independent result", () => {
 
   assert.notEqual(mapSeed, rewardSeed);
   assert.notEqual(randomU32(mapSeed, 0), randomU32(rewardSeed, 0));
+});
+
+test("numeric random seed normalizes to one deterministic master seed", () => {
+  const randomSeed = 20_260_425;
+  const normalizedSeed = masterSeedFromRandomSeed(randomSeed);
+
+  assert.equal(deriveSeed(randomSeed, "map"), deriveSeed(normalizedSeed, "map"));
+  assert.equal(randomU32(randomSeed, 4), randomU32(normalizedSeed, 4));
 });
 
 test("map seed and reward seed do not affect each other", () => {

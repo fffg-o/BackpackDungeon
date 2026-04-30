@@ -14,8 +14,8 @@ const BASE_INPUT: DailyMapInput = Object.freeze({
   dayId: "2026-04-25",
   enemyCount: 12,
   height: 60,
-  masterSeed: "packrun-master",
   poiDensity: 0.04,
+  randomSeed: 20_260_425,
   shopCount: 4,
   treasureCount: 8,
   width: 90
@@ -33,7 +33,7 @@ test("different seed produces a different map", () => {
   const first = generateDailyMap(BASE_INPUT);
   const second = generateDailyMap({
     ...BASE_INPUT,
-    masterSeed: "packrun-other-master"
+    randomSeed: 20_260_426
   });
 
   assert.notDeepEqual(first.locations, second.locations);
