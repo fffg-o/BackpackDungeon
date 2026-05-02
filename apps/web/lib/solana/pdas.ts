@@ -129,9 +129,10 @@ export function playerBossContributionPda(
 export function dailyRewardClaimPda(
   dayId: string,
   player: PublicKey,
+  poiIdHash: Uint8Array,
 ): readonly [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [utf8Seed("daily_claim"), utf8Seed(dayId), player.toBuffer()],
+    [utf8Seed("daily_claim"), utf8Seed(dayId), player.toBuffer(), bytes32Seed(poiIdHash, "poiIdHash")],
     PACKRUN_PROGRAM_PUBLIC_KEY,
   );
 }

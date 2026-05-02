@@ -129,7 +129,7 @@ export function toAnchorShopSlot(slot: ShopItemSlot): AnchorShopItemSlotSpecInpu
     maxStock: slot.stock,
     restockIntervalSeconds: new BN(300),
     maxRestockCount: 0,
-    perWalletDailyLimit: 5,
+    perWalletDailyLimit: Math.min(5, slot.stock),
     rewardTier: anchorEnum(slot.rewardTier),
   };
 }

@@ -456,6 +456,36 @@
           }
         },
         {
+          "name": "location_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  111,
+                  99,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "daily_dungeon.day_id",
+                "account": "DailyDungeon"
+              },
+              {
+                "kind": "account",
+                "path": "location_account.poi_id_hash",
+                "account": "LocationAccount"
+              }
+            ]
+          }
+        },
+        {
           "name": "daily_reward_claim",
           "writable": true,
           "pda": {
@@ -484,6 +514,11 @@
               {
                 "kind": "account",
                 "path": "player"
+              },
+              {
+                "kind": "account",
+                "path": "location_account.poi_id_hash",
+                "account": "LocationAccount"
               }
             ]
           }

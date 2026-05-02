@@ -4,6 +4,11 @@ use solana_sha256_hasher::hash;
 declare_id!("Hj9xusyzfxP8ic9U6rmpGcY4pPGFBJQqm7BUJ4w475jU");
 
 pub const DAILY_DUNGEON_SEED: &[u8] = b"dungeon";
+
+/// Settlement period in seconds (2 hours at the end of each 24h cycle).
+/// During this window the dungeon is closed for gameplay and players can
+/// mint settlement NFTs.
+pub const SETTLEMENT_DURATION_SECONDS: i64 = 7_200; // 2 hours
 pub const LOCATION_SEED: &[u8] = b"location";
 pub const ENEMY_LOCATION_SEED: &[u8] = b"enemy";
 pub const SHOP_SEED: &[u8] = b"shop";
@@ -583,7 +588,6 @@ pub mod packrun {
             &ctx.accounts.daily_reward_claim,
             ctx.accounts.player.key(),
             ctx.accounts.daily_dungeon.key(),
-            now,
         )?;
 
         let reward_tier = compute_daily_reward_tier(
@@ -1073,10 +1077,17 @@ pub struct ClaimDailyReward<'info> {
     )]
     pub player_run: Account<'info, PlayerRun>,
     #[account(
-        init,
+        seeds = [LOCATION_SEED, daily_dungeon.day_id.as_bytes(), location_account.poi_id_hash.as_ref()],
+        bump = location_account.bump,
+        constraint = location_account.daily_dungeon == daily_dungeon.key() @ PackrunError::InvalidLocationAccount,
+        constraint = location_account.kind == LocationKind::Treasure @ PackrunError::LocationIsNotTreasure
+    )]
+    pub location_account: Account<'info, LocationAccount>,
+    #[account(
+        init_if_needed,
         payer = player,
         space = DAILY_REWARD_CLAIM_SPACE,
-        seeds = [DAILY_REWARD_CLAIM_SEED, daily_dungeon.day_id.as_bytes(), player.key().as_ref()],
+        seeds = [DAILY_REWARD_CLAIM_SEED, daily_dungeon.day_id.as_bytes(), player.key().as_ref(), location_account.poi_id_hash.as_ref()],
         bump
     )]
     pub daily_reward_claim: Account<'info, DailyRewardClaim>,
@@ -1513,8 +1524,9 @@ fn validate_enter_dungeon(dungeon: &DailyDungeon, day_id: &str, now: i64) -> Res
         dungeon.status == DungeonStatus::Open,
         PackrunError::DungeonNotOpen
     );
+    // Only allow entering during the 22-hour open window (before settlement period)
     require!(
-        now >= dungeon.start_ts && now <= dungeon.end_ts,
+        now >= dungeon.start_ts && now < dungeon.end_ts - SETTLEMENT_DURATION_SECONDS,
         PackrunError::DungeonNotInOpenWindow
     );
 
@@ -1545,8 +1557,9 @@ fn validate_init_shop_item_slot(
         dungeon.status == DungeonStatus::Open,
         PackrunError::DungeonNotOpen
     );
+    // Shop item slot initialization only during open window (before settlement)
     require!(
-        now >= dungeon.start_ts && now <= dungeon.end_ts,
+        now >= dungeon.start_ts && now < dungeon.end_ts - SETTLEMENT_DURATION_SECONDS,
         PackrunError::DungeonNotInOpenWindow
     );
     require!(
@@ -1599,8 +1612,9 @@ fn validate_clear_enemy(
         dungeon.status == DungeonStatus::Open,
         PackrunError::DungeonNotOpen
     );
+    // Clear enemy only during open window (before settlement)
     require!(
-        now >= dungeon.start_ts && now <= dungeon.end_ts,
+        now >= dungeon.start_ts && now < dungeon.end_ts - SETTLEMENT_DURATION_SECONDS,
         PackrunError::DungeonNotInOpenWindow
     );
     require!(player_run.active, PackrunError::PlayerRunNotActive);
@@ -1638,8 +1652,9 @@ fn validate_buy_item(
         dungeon.status == DungeonStatus::Open,
         PackrunError::DungeonNotOpen
     );
+    // Buy item only during open window (before settlement)
     require!(
-        now >= dungeon.start_ts && now <= dungeon.end_ts,
+        now >= dungeon.start_ts && now < dungeon.end_ts - SETTLEMENT_DURATION_SECONDS,
         PackrunError::DungeonNotInOpenWindow
     );
     require!(player_run.active, PackrunError::PlayerRunNotActive);
@@ -1733,8 +1748,9 @@ fn validate_submit_boss_damage(
         dungeon.status == DungeonStatus::Open,
         PackrunError::DungeonNotOpen
     );
+    // Submit boss damage only during open window (before settlement)
     require!(
-        now >= dungeon.start_ts && now <= dungeon.end_ts,
+        now >= dungeon.start_ts && now < dungeon.end_ts - SETTLEMENT_DURATION_SECONDS,
         PackrunError::DungeonNotInOpenWindow
     );
     require!(player_run.active, PackrunError::PlayerRunNotActive);
@@ -1894,18 +1910,14 @@ impl BossNftClaim {
 }
 
 fn validate_claim_daily_reward(
-    dungeon: &DailyDungeon,
+    _dungeon: &DailyDungeon,
     player_run: &PlayerRun,
     daily_reward_claim: &DailyRewardClaim,
     player_pubkey: Pubkey,
     dungeon_key: Pubkey,
-    now: i64,
 ) -> Result<()> {
-    // Current time must be after dungeon end_ts
-    require!(
-        now > dungeon.end_ts,
-        PackrunError::DungeonNotEnded
-    );
+    // Immediate reward: claimable as soon as player has entered the dungeon.
+    // No end_ts check needed – the settlement NFT mint will gate on end_ts.
 
     // Player must have an active run
     require!(player_run.active, PackrunError::PlayerRunNotActive);
@@ -1933,8 +1945,9 @@ fn validate_claim_daily_reward(
 
 /// Compute the reward tier a player qualifies for based on their run performance.
 ///
-/// Tiers are evaluated from highest (Legendary) to lowest (Uncommon).
-/// If no tier is met, returns an error.
+/// Tiers are evaluated from highest (Legendary) to lowest (Common).
+/// If no tier is met, falls back to Common (entry reward — claimable immediately
+/// upon entering the dungeon, even with 0 cleared locations).
 fn compute_daily_reward_tier(
     dungeon: &DailyDungeon,
     player_run: &PlayerRun,
@@ -1983,8 +1996,9 @@ fn compute_daily_reward_tier(
         return Ok(RewardTier::Uncommon);
     }
 
-    // No tier met
-    Err(error!(PackrunError::DailyRewardTierNotMet))
+    // Common: any active player run (entry reward – claimable immediately
+    // upon entering the dungeon, even with 0 cleared locations).
+    Ok(RewardTier::Common)
 }
 
 fn apply_claim_daily_reward(
@@ -2528,6 +2542,8 @@ pub enum PackrunError {
     DailyRewardTierNotMet,
     #[msg("player run not found for this day and player.")]
     PlayerRunNotFound,
+    #[msg("location is not a treasure.")]
+    LocationIsNotTreasure,
 }
 
 #[cfg(test)]
@@ -2568,7 +2584,7 @@ mod tests {
 
     #[test]
     fn validates_enter_dungeon() {
-        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 10_000);
 
         assert!(validate_enter_dungeon(&dungeon, "2026-04-25", 1_500).is_ok());
     }
@@ -2589,9 +2605,9 @@ mod tests {
 
     #[test]
     fn rejects_enter_dungeon_after_open_window() {
-        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 10_000);
 
-        assert!(validate_enter_dungeon(&dungeon, "2026-04-25", 2_001).is_err());
+        assert!(validate_enter_dungeon(&dungeon, "2026-04-25", 3_000).is_err());
     }
 
     #[test]
@@ -2700,7 +2716,7 @@ mod tests {
 
     #[test]
     fn validates_init_shop_item_slot_input() {
-        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 10_000);
         let location = test_shop_location_account();
         let shop = test_shop_account(Pubkey::default());
         let slot = test_shop_item_slot_spec();
@@ -2821,7 +2837,7 @@ mod tests {
 
     #[test]
     fn buy_item_succeeds_with_valid_inputs() {
-        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 10_000);
         let location = test_shop_location_account();
         let shop_key = Pubkey::default();
         let slot = test_shop_item_slot_account();
@@ -3015,7 +3031,7 @@ mod tests {
 
     #[test]
     fn submit_boss_damage_succeeds_with_valid_inputs() {
-        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 10_000);
         let location = test_boss_location_account();
         let player_run = test_player_run();
         let player_pubkey = Pubkey::default();
@@ -3712,25 +3728,10 @@ mod tests {
     }
 
     // ── claim_daily_reward tests ─────────────────────────────────────────────
-
-    #[test]
-    fn claim_daily_reward_fails_before_end_ts() {
-        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
-        let player_run = test_player_run();
-        let claim = test_daily_reward_claim_unclaimed();
-        let dungeon_key = Pubkey::default();
-
-        // now=1_500 < end_ts=2_000 → should fail
-        assert!(validate_claim_daily_reward(
-            &dungeon,
-            &player_run,
-            &claim,
-            Pubkey::default(),
-            dungeon_key,
-            1_500,
-        )
-        .is_err());
-    }
+    //
+    // Note: validate_claim_daily_reward no longer checks end_ts — rewards are
+    // claimable immediately upon entering the dungeon. The settlement-period
+    // NFT mint carries the end_ts gate instead.
 
     #[test]
     fn claim_daily_reward_fails_when_player_run_not_active() {
@@ -3746,7 +3747,6 @@ mod tests {
             &claim,
             Pubkey::default(),
             dungeon_key,
-            3_000,
         )
         .is_err());
     }
@@ -3772,7 +3772,6 @@ mod tests {
             &claim,
             Pubkey::default(),
             dungeon_key,
-            3_000,
         )
         .is_err());
     }
@@ -3791,13 +3790,12 @@ mod tests {
             &claim,
             Pubkey::default(),
             dungeon_key,
-            3_000,
         )
         .is_err());
     }
 
     #[test]
-    fn claim_daily_reward_succeeds_after_end_ts_with_valid_run() {
+    fn claim_daily_reward_succeeds_with_valid_run() {
         let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
         let player_run = test_player_run();
         let claim = test_daily_reward_claim_unclaimed();
@@ -3809,7 +3807,6 @@ mod tests {
             &claim,
             Pubkey::default(),
             dungeon_key,
-            3_000, // after end_ts
         )
         .is_ok());
     }
@@ -3873,20 +3870,26 @@ mod tests {
     }
 
     #[test]
-    fn reward_tier_fails_when_no_conditions_met() {
-        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+    fn reward_tier_common_when_no_conditions_met() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 10_000);
         let player_run = test_player_run(); // cleared_locations=0, boss_damage=0
 
-        assert!(compute_daily_reward_tier(&dungeon, &player_run).is_err());
+        assert_eq!(
+            compute_daily_reward_tier(&dungeon, &player_run).unwrap(),
+            RewardTier::Common
+        );
     }
 
     #[test]
-    fn reward_tier_2_cleared_locations_is_not_enough_for_uncommon() {
-        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+    fn reward_tier_2_cleared_locations_falls_back_to_common() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 10_000);
         let mut player_run = test_player_run();
         player_run.cleared_locations = 2;
 
-        assert!(compute_daily_reward_tier(&dungeon, &player_run).is_err());
+        assert_eq!(
+            compute_daily_reward_tier(&dungeon, &player_run).unwrap(),
+            RewardTier::Common
+        );
     }
 
     // ── apply_claim_daily_reward tests ───────────────────────────────────────

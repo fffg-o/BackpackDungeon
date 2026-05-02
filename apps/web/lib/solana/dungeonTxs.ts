@@ -338,10 +338,12 @@ export async function claimDailyReward(
   program: PackrunProgram,
   dayId: string,
   player: PublicKey,
+  poiIdHash: Uint8Array,
 ): Promise<string> {
   const [dailyDungeon] = dailyDungeonPda(dayId);
   const [playerRun] = playerRunPda(dayId, player);
-  const [dailyRewardClaim] = dailyRewardClaimPda(dayId, player);
+  const [locationAccount] = locationPda(dayId, poiIdHash);
+  const [dailyRewardClaim] = dailyRewardClaimPda(dayId, player, poiIdHash);
 
   return program.methods
     .claimDailyReward()
@@ -349,6 +351,7 @@ export async function claimDailyReward(
       player,
       dailyDungeon,
       playerRun,
+      locationAccount,
       dailyRewardClaim,
       systemProgram: SystemProgram.programId,
     })

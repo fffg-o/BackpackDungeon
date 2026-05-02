@@ -153,9 +153,10 @@ export async function fetchPoiOnChainState(
   spec: DailyLocationSpec,
   player?: PublicKey,
 ): Promise<PoiOnChainState> {
+  const poiIdHash = sha256Bytes32(spec.id);
   const [playerRun, dailyRewardClaim, bossNftClaim] = await Promise.all([
     player ? fetchPlayerRun(program, dayId, player) : Promise.resolve(null),
-    player ? fetchDailyRewardClaim(program, dayId, player) : Promise.resolve(null),
+    player ? fetchDailyRewardClaim(program, dayId, player, poiIdHash) : Promise.resolve(null),
     player ? fetchBossNftClaim(program, dayId, player) : Promise.resolve(null),
   ]);
 
@@ -348,8 +349,9 @@ export async function fetchDailyRewardClaim(
   program: PackrunProgram,
   dayId: string,
   player: PublicKey,
+  poiIdHash: Uint8Array,
 ): Promise<RewardClaimState | null> {
-  const [address] = dailyRewardClaimPda(dayId, player);
+  const [address] = dailyRewardClaimPda(dayId, player, poiIdHash);
   const account = await program.account.dailyRewardClaim.fetchNullable(address);
   return account ? normalizeDailyRewardClaim(account) : null;
 }

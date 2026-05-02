@@ -36,7 +36,7 @@ import {
   initShopItemSlot,
   submitBossDamage,
 } from "../../lib/solana/dungeonTxs";
-import { bossShardIndexForPlayer } from "../../lib/solana/pdas";
+import { bossShardIndexForPlayer, sha256Bytes32 } from "../../lib/solana/pdas";
 import { simulateBattle, type BattleResult } from "./battle-sim";
 import styles from "./dungeon.module.css";
 
@@ -157,7 +157,21 @@ function shopTxKey(kind: "initShopSlot" | "buyItem", slotIndex: number): TxPendi
 }
 
 function formatError(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
+  if (error instanceof Error) return error.message;
+  if (typeof error === "object" && error !== null) {
+    // Handle wallet rejection errors (plain objects like { code: 4001, message: "..." })
+    if ("message" in error && typeof (error as Record<string, unknown>).message === "string") {
+      return (error as Record<string, unknown>).message as string;
+    }
+    try {
+      const str = String(error);
+      if (str !== "[object Object]") return str;
+    } catch {
+      // fall through
+    }
+  }
+  if (typeof error === "string") return error;
+  return fallback;
 }
 
 export default function DailyDungeonPage() {
@@ -662,8 +676,10 @@ export default function DailyDungeonPage() {
     setTxSignature(null);
     setChainError(null);
     try {
+      if (!selectedPoi) throw new Error("No location selected.");
       const { player, signingProgram } = requireWallet();
-      const signature = await claimDailyReward(signingProgram, map.dayId, player);
+      const poiIdHash = sha256Bytes32(selectedPoi.spec.id);
+      const signature = await claimDailyReward(signingProgram, map.dayId, player, poiIdHash);
       setDailyRewardPhase({ phase: "success", signature });
       setTxSignature(signature);
       await refreshAfterTx();
@@ -677,7 +693,7 @@ export default function DailyDungeonPage() {
     } finally {
       setTxPending(null);
     }
-  }, [map.dayId, refreshAfterTx, requireWallet]);
+  }, [map.dayId, refreshAfterTx, requireWallet, selectedPoi]);
 
   const dungeonStatus = dungeonLoading
     ? "Loading"
@@ -1031,7 +1047,6 @@ function PoiDetailPanel({
       {initialized && walletConnected && hasPlayerRun && spec.kind === LocationKind.Treasure && (
         <TreasureContent
           spec={spec}
-          dailyDungeon={dailyDungeon}
           onChain={onChain}
           dailyRewardPhase={dailyRewardPhase}
           onClaimDailyReward={onClaimDailyReward}
@@ -1472,7 +1487,6 @@ function BossContent({
 
 function TreasureContent({
   spec,
-  dailyDungeon,
   onChain,
   dailyRewardPhase,
   onClaimDailyReward,
@@ -1481,7 +1495,6 @@ function TreasureContent({
   txPending,
 }: {
   readonly spec: DailyLocationSpec;
-  readonly dailyDungeon: DailyDungeonState | null;
   readonly onChain: PoiOnChainState | null;
   readonly dailyRewardPhase: TxPhase;
   readonly onClaimDailyReward: () => void;
@@ -1490,8 +1503,6 @@ function TreasureContent({
   readonly txPending: TxPending;
 }) {
   const tier = spec.rewardTier ?? RewardTier.Common;
-  const now = Math.floor(Date.now() / 1000);
-  const dungeonEnded = dailyDungeon ? now > dailyDungeon.endTs : false;
 
   return (
     <div className={styles.detailSection}>
@@ -1514,10 +1525,6 @@ function TreasureContent({
       ) : !hasPlayerRun ? (
         <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
           Enter Dungeon
-        </button>
-      ) : !dungeonEnded ? (
-        <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
-          Claim Daily Reward after dungeon end
         </button>
       ) : dailyRewardPhase.phase === "idle" ? (
         <button className={styles.btnClear} onClick={onClaimDailyReward} disabled={txPending !== null} style={{ marginTop: 8 }}>

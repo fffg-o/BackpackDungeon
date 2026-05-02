@@ -136,10 +136,12 @@ async function main() {
     return;
   }
 
-  // 6. Prepare time window (1 hour ago → 24 hours from now)
+  // 6. Prepare time window: 24-hour total cycle = 22 hours open + 2 hours settlement.
+  //    The dungeon starts 1 hour ago (so it's already open), and the total cycle
+  //    from start to end is 24 hours.
   const now = Math.floor(Date.now() / 1000);
   const startTs = new BN(now - 3600); // 1 hour ago
-  const endTs = new BN(now + 86400);  // 24 hours from now
+  const endTs = new BN(now + 82800);  // 23 hours from now (24h total from startTs)
 
   // Placeholder ruleset hash (32 zero bytes)
   const rulesetHash = new Uint8Array(32).fill(0);
