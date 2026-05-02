@@ -530,6 +530,102 @@
   padding: 12px;
 }
 
+.battleArena {
+  margin-top: 4px;
+}
+
+.arenaHeader {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.arenaCombatant {
+  font-size: 12px;
+  color: #d0d4d8;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arenaCombatant:last-child {
+  text-align: right;
+}
+
+.arenaVs {
+  font-size: 10px;
+  color: #6a727a;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.hpGrid {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.hpBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hpMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.hpBar {
+  width: 100%;
+  height: 10px;
+  background: #1a1e22;
+  border: 1px solid #2a2e32;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.hpBarPlayer {
+  border-color: #1f5f38;
+}
+
+.hpBarEnemy,
+.hpBarBoss {
+  border-color: #5f2a24;
+}
+
+.hpFill {
+  height: 100%;
+  min-width: 2px;
+  border-radius: 999px;
+  transition: width 0.25s ease, background 0.25s ease;
+}
+
+.hpFillHealthy {
+  background: #2ecc71;
+}
+
+.hpFillWarn {
+  background: #f1c40f;
+}
+
+.hpFillDanger {
+  background: #e74c3c;
+}
+
+.pillRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
 .battleStats {
   display: flex;
   gap: 8px;
@@ -584,10 +680,15 @@
   gap: 8px;
   padding: 3px 4px;
   border-bottom: 1px solid #14181a;
+  border-radius: 4px;
 }
 
 .logEntry:last-child {
   border-bottom: none;
+}
+
+.logEntryActive {
+  background: #1a1e22;
 }
 
 .logTurn {

@@ -27,14 +27,28 @@ import type { IntegerLike } from "./shopMath";
 import { toBigInt } from "./shopMath";
 
 export interface BattleResultInput {
+  readonly version?: 1;
+  readonly inputHash?: string;
+  readonly resultHash?: string;
+  readonly proofHash?: string;
+  readonly encounterKind?: "enemy" | "boss";
   readonly won: boolean;
   readonly turnsTaken: number;
+  readonly playerDamageDealt?: number;
+  readonly enemyDamageDealt?: number;
   readonly damageTaken: number;
+  readonly playerHpRemaining?: number;
+  readonly enemyHpRemaining?: number;
   readonly flawless: boolean;
-  readonly log?: readonly {
-    readonly attacker: "player" | "enemy";
-    readonly damage: number;
-  }[];
+  readonly score?: number;
+  readonly bossDamageScore?: number;
+  readonly log?: readonly BattleLogEntryInput[];
+}
+
+export interface BattleLogEntryInput {
+  readonly attacker?: "player" | "enemy";
+  readonly actor?: "player" | "enemy";
+  readonly damage: number;
 }
 
 export async function enterDungeon(
@@ -214,6 +228,7 @@ export async function clearEnemy(
   spec: DailyLocationSpec,
   player: PublicKey,
   battleResult: BattleResultInput,
+  proofHashOverride?: string,
 ): Promise<string> {
   const poiIdHash = sha256Bytes32(spec.id);
   const [dailyDungeon] = dailyDungeonPda(dayId);
@@ -223,9 +238,9 @@ export async function clearEnemy(
 
   return program.methods
     .clearEnemy(
-      battleHash("enemy-clear", battleResult),
+      battleResultHash("enemy-clear", battleResult),
       toPlayerPerformanceSummary(battleResult),
-      null,
+      maybeHex32ToNumberArray(proofHashOverride ?? battleResult.proofHash),
     )
     .accounts({
       player,
@@ -273,6 +288,7 @@ export async function submitBossDamage(
   damage: IntegerLike,
   battleResult: BattleResultInput,
   bossShardCount: number,
+  proofHashOverride?: string,
 ): Promise<string> {
   const poiIdHash = sha256Bytes32(spec.id);
   const shardIndex = bossShardIndexForPlayer(player, bossShardCount);
@@ -286,9 +302,9 @@ export async function submitBossDamage(
   return program.methods
     .submitBossDamage(
       bigintToBn(toBigInt(damage)),
-      battleHash("boss-damage", battleResult),
+      battleResultHash("boss-damage", battleResult),
       shardIndex,
-      null,
+      maybeHex32ToNumberArray(proofHashOverride ?? battleResult.proofHash),
     )
     .accounts({
       player,
@@ -360,10 +376,7 @@ export async function claimDailyReward(
 
 function toPlayerPerformanceSummary(result: BattleResultInput): Record<string, unknown> {
   const damageDealt =
-    result.log?.reduce(
-      (total, entry) => (entry.attacker === "player" ? total + entry.damage : total),
-      0,
-    ) ?? 0;
+    result.playerDamageDealt ?? computePlayerDamageDealtFromLog(result.log) ?? 0;
   const score = Math.max(
     0,
     damageDealt + (result.won ? 100 : 0) + (result.flawless ? 50 : 0) - result.damageTaken,
@@ -373,12 +386,18 @@ function toPlayerPerformanceSummary(result: BattleResultInput): Record<string, u
     damageDealt,
     damageTaken: result.damageTaken,
     turnsTaken: result.turnsTaken,
-    score,
+    score: result.score ?? score,
     flawless: result.flawless,
   };
 }
 
-function battleHash(domain: string, result: BattleResultInput): readonly number[] {
+function battleResultHash(domain: string, result: BattleResultInput): readonly number[] {
+  return result.resultHash !== undefined
+    ? hex32ToNumberArray(result.resultHash)
+    : legacyBattleHash(domain, result);
+}
+
+function legacyBattleHash(domain: string, result: BattleResultInput): readonly number[] {
   return Array.from(
     sha256Bytes32(
       JSON.stringify({
@@ -387,12 +406,53 @@ function battleHash(domain: string, result: BattleResultInput): readonly number[
         turnsTaken: result.turnsTaken,
         damageTaken: result.damageTaken,
         flawless: result.flawless,
-        damageDealt: result.log
-          ?.filter((entry) => entry.attacker === "player")
-          .reduce((total, entry) => total + entry.damage, 0),
+        damageDealt: result.playerDamageDealt ?? computePlayerDamageDealtFromLog(result.log),
       }),
     ),
   );
+}
+
+export function hex32ToNumberArray(hex: string): readonly number[] {
+  const normalized = normalizeHex32(hex);
+  const bytes: number[] = [];
+
+  for (let index = 0; index < normalized.length; index += 2) {
+    bytes.push(Number.parseInt(normalized.slice(index, index + 2), 16));
+  }
+
+  return bytes;
+}
+
+export function maybeHex32ToNumberArray(hex?: string): readonly number[] | null {
+  return hex === undefined ? null : hex32ToNumberArray(hex);
+}
+
+function normalizeHex32(hex: string): string {
+  if (typeof hex !== "string") {
+    throw new TypeError("hex must be a string.");
+  }
+
+  const trimmed = hex.trim();
+  const withoutPrefix =
+    trimmed.startsWith("0x") || trimmed.startsWith("0X") ? trimmed.slice(2) : trimmed;
+
+  if (!/^[0-9a-fA-F]{64}$/.test(withoutPrefix)) {
+    throw new RangeError("hex must be a 32-byte hex string with 64 hex characters.");
+  }
+
+  return withoutPrefix;
+}
+
+function computePlayerDamageDealtFromLog(
+  log?: readonly BattleLogEntryInput[],
+): number | undefined {
+  return log
+    ?.filter((entry) => getBattleLogActor(entry) === "player")
+    .reduce((total, entry) => total + entry.damage, 0);
+}
+
+function getBattleLogActor(entry: BattleLogEntryInput): "player" | "enemy" | null {
+  return entry.actor ?? entry.attacker ?? null;
 }
 
 function bigintToBn(value: bigint): BN {

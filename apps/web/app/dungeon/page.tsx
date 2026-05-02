@@ -3,14 +3,20 @@
 import { useAnchorWallet, useWallet } from "@solana/wallet-adapter-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WalletButton } from "./wallet-button";
+import { BattleArena } from "./components/BattleArena";
+import { StatPill } from "./components/StatPill";
 import {
+  buildBattleInput,
   buildLocationMerkleTree,
-  computeBossDamage,
   createDailyMapInput,
   generateDailyMap,
   getLocationProof,
   parseDailyMapRandomSeed,
+  simulateBossBattle,
+  simulateEnemyBattle,
   todayDayId,
+  type BattlePlayerSnapshotV1,
+  type BattleResultV1,
   type DailyLocationSpec,
   type DailyMapInput,
 } from "@backpack-dungeon/game-core";
@@ -37,7 +43,6 @@ import {
   submitBossDamage,
 } from "../../lib/solana/dungeonTxs";
 import { bossShardIndexForPlayer, sha256Bytes32 } from "../../lib/solana/pdas";
-import { simulateBattle, type BattleResult } from "./battle-sim";
 import styles from "./dungeon.module.css";
 
 const ENABLE_MANUAL_POI_INIT =
@@ -59,8 +64,9 @@ type TxPhase =
 
 type BattlePhase =
   | { readonly phase: "idle" }
-  | { readonly phase: "simulating" }
-  | { readonly phase: "result"; readonly result: BattleResult }
+  | { readonly phase: "preparing" }
+  | { readonly phase: "replaying"; readonly result: BattleResultV1; readonly replayIndex: number }
+  | { readonly phase: "result"; readonly result: BattleResultV1 }
   | { readonly phase: "submitting" }
   | { readonly phase: "success"; readonly signature: string }
   | { readonly phase: "error"; readonly message: string };
@@ -75,8 +81,14 @@ type ShopActionPhase =
 
 type BossBattlePhase =
   | { readonly phase: "idle" }
-  | { readonly phase: "simulating" }
-  | { readonly phase: "result"; readonly result: BattleResult; readonly damage: number }
+  | { readonly phase: "preparing" }
+  | {
+      readonly phase: "replaying";
+      readonly result: BattleResultV1;
+      readonly replayIndex: number;
+      readonly damage: number;
+    }
+  | { readonly phase: "result"; readonly result: BattleResultV1; readonly damage: number }
   | { readonly phase: "submitting" }
   | { readonly phase: "success"; readonly damage: number; readonly signature: string }
   | { readonly phase: "error"; readonly message: string };
@@ -100,6 +112,7 @@ const MAP_INPUT: DailyMapInput = createDailyMapInput({
 
 const ENEMY_CLEAR_ENERGY_COST = 5;
 const EXPLORER_CLUSTER = "devnet";
+const BATTLE_REPLAY_STEP_MS = 450;
 
 const POI_ICONS: Record<LocationKindType, string> = {
   [LocationKind.Enemy]: "⚔️",
@@ -174,6 +187,35 @@ function formatError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function buildPlayerSnapshot(playerRun: PlayerRunState): BattlePlayerSnapshotV1 {
+  return {
+    energy: playerRun.energy,
+    clearedLocations: playerRun.clearedLocations,
+    bossDamage: playerRun.bossDamage,
+    itemsPurchased: playerRun.itemsPurchased,
+    commonLootCount: playerRun.commonLootCount,
+    rareEligibilityPoints: playerRun.rareEligibilityPoints,
+  };
+}
+
+function bytesToHex(bytes: readonly number[] | Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function getRulesetHash(dailyDungeon: DailyDungeonState | null): string | undefined {
+  const hash = (dailyDungeon as (DailyDungeonState & { readonly rulesetHash?: string }) | null)
+    ?.rulesetHash;
+  return typeof hash === "string" && hash.length > 0 ? hash : undefined;
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window === "undefined" ||
+    typeof window.matchMedia !== "function" ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
 export default function DailyDungeonPage() {
   const wallet = useWallet();
   const anchorWallet = useAnchorWallet();
@@ -203,13 +245,31 @@ export default function DailyDungeonPage() {
 
   const [, setTick] = useState(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const battleReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bossReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearBattleReplayTimer = useCallback(() => {
+    if (battleReplayTimerRef.current) {
+      clearTimeout(battleReplayTimerRef.current);
+      battleReplayTimerRef.current = null;
+    }
+  }, []);
+
+  const clearBossReplayTimer = useCallback(() => {
+    if (bossReplayTimerRef.current) {
+      clearTimeout(bossReplayTimerRef.current);
+      bossReplayTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     tickRef.current = setInterval(() => setTick((t) => t + 1), 1000);
     return () => {
       if (tickRef.current) clearInterval(tickRef.current);
+      clearBattleReplayTimer();
+      clearBossReplayTimer();
     };
-  }, []);
+  }, [clearBattleReplayTimer, clearBossReplayTimer]);
 
   const map = useMemo(() => generateDailyMap(MAP_INPUT), []);
   const merkleTree = useMemo(() => buildLocationMerkleTree(map.locations), [map]);
@@ -340,6 +400,62 @@ export default function DailyDungeonPage() {
   }, [refreshPlayerRun]);
 
   useEffect(() => {
+    if (battlePhase.phase !== "replaying") {
+      clearBattleReplayTimer();
+      return;
+    }
+
+    if (battlePhase.replayIndex >= battlePhase.result.log.length - 1) {
+      setBattlePhase({ phase: "result", result: battlePhase.result });
+      return;
+    }
+
+    battleReplayTimerRef.current = setTimeout(() => {
+      setBattlePhase((current) => {
+        if (current.phase !== "replaying") return current;
+        return {
+          ...current,
+          replayIndex: Math.min(current.replayIndex + 1, current.result.log.length - 1),
+        };
+      });
+    }, BATTLE_REPLAY_STEP_MS);
+
+    return () => clearBattleReplayTimer();
+  }, [battlePhase, clearBattleReplayTimer]);
+
+  useEffect(() => {
+    if (bossBattlePhase.phase !== "replaying") {
+      clearBossReplayTimer();
+      return;
+    }
+
+    if (bossBattlePhase.replayIndex >= bossBattlePhase.result.log.length - 1) {
+      setBossBattlePhase({
+        phase: "result",
+        result: bossBattlePhase.result,
+        damage: bossBattlePhase.damage,
+      });
+      return;
+    }
+
+    bossReplayTimerRef.current = setTimeout(() => {
+      setBossBattlePhase((current) => {
+        if (current.phase !== "replaying") return current;
+        return {
+          ...current,
+          replayIndex: Math.min(current.replayIndex + 1, current.result.log.length - 1),
+        };
+      });
+    }, BATTLE_REPLAY_STEP_MS);
+
+    return () => clearBossReplayTimer();
+  }, [bossBattlePhase, clearBossReplayTimer]);
+
+  useEffect(() => {
+    clearBattleReplayTimer();
+    clearBossReplayTimer();
+    setBattlePhase({ phase: "idle" });
+    setBossBattlePhase({ phase: "idle" });
     if (selectedPoi) {
       void loadPoiState(selectedPoi.spec, selectedPoi.merkleProof);
     }
@@ -349,6 +465,8 @@ export default function DailyDungeonPage() {
   const handlePoiClick = useCallback(
     (spec: DailyLocationSpec) => {
       const proof = getLocationProof(map.locations, spec.id);
+      clearBattleReplayTimer();
+      clearBossReplayTimer();
       setBattlePhase({ phase: "idle" });
       setShopActionPhase({ phase: "idle" });
       setBossBattlePhase({ phase: "idle" });
@@ -359,7 +477,7 @@ export default function DailyDungeonPage() {
       setTxSignature(null);
       void loadPoiState(spec, proof);
     },
-    [map.locations, loadPoiState],
+    [clearBattleReplayTimer, clearBossReplayTimer, map.locations, loadPoiState],
   );
 
   const requireWallet = useCallback(() => {
@@ -371,6 +489,33 @@ export default function DailyDungeonPage() {
       signingProgram: createPackrunProgram(anchorWallet),
     };
   }, [anchorWallet, publicKey]);
+
+  const showBattleResult = useCallback(
+    (result: BattleResultV1) => {
+      clearBattleReplayTimer();
+      if (prefersReducedMotion() || result.log.length === 0) {
+        setBattlePhase({ phase: "result", result });
+        return;
+      }
+
+      setBattlePhase({ phase: "replaying", result, replayIndex: 0 });
+    },
+    [clearBattleReplayTimer],
+  );
+
+  const showBossBattleResult = useCallback(
+    (result: BattleResultV1) => {
+      clearBossReplayTimer();
+      const damage = result.bossDamageScore;
+      if (prefersReducedMotion() || result.log.length === 0) {
+        setBossBattlePhase({ phase: "result", result, damage });
+        return;
+      }
+
+      setBossBattlePhase({ phase: "replaying", result, replayIndex: 0, damage });
+    },
+    [clearBossReplayTimer],
+  );
 
   const handleEnterDungeon = useCallback(async () => {
     setEnterPhase({ phase: "submitting" });
@@ -423,14 +568,59 @@ export default function DailyDungeonPage() {
   }, [map.dayId, refreshAfterTx, requireWallet, selectedPoi]);
 
   const handleStartBattle = useCallback(() => {
-    if (!selectedPoi?.spec.enemy || !selectedPoi.onChain?.initialized) return;
-    const clearCount = selectedPoi.onChain.clearCount ?? 0;
-    const result = simulateBattle(selectedPoi.spec.enemy, clearCount);
-    setBattlePhase({ phase: "result", result });
-  }, [selectedPoi]);
+    clearBattleReplayTimer();
+    setBattlePhase({ phase: "preparing" });
+
+    try {
+      if (!publicKey) throw new Error("Connect wallet first.");
+      if (!playerRun) throw new Error("Enter dungeon first.");
+      if (!selectedPoi?.spec.enemy) throw new Error("No enemy selected.");
+
+      const onChain = selectedPoiState ?? selectedPoi.onChain;
+      if (!onChain?.initialized) throw new Error("Initialize Location first.");
+      if (isOnCooldown(onChain)) {
+        throw new Error(`Clear Enemy cooldown ${formatCooldown(getCooldownSeconds(onChain))}.`);
+      }
+      if (playerRun.energy < ENEMY_CLEAR_ENERGY_COST) {
+        throw new Error("Not enough energy.");
+      }
+
+      const clearCount = onChain.clearCount ?? 0;
+      const input = buildBattleInput({
+        encounterKind: "enemy",
+        dayId: map.dayId,
+        mapRoot: merkleTree.root,
+        rulesetHash: getRulesetHash(dailyDungeon),
+        player: publicKey.toBase58(),
+        poiId: selectedPoi.spec.id,
+        poiIdHash: bytesToHex(sha256Bytes32(selectedPoi.spec.id)),
+        enemyConfig: selectedPoi.spec.enemy,
+        clearCount,
+        attemptIndex: playerRun.clearedLocations + clearCount,
+        playerSnapshot: buildPlayerSnapshot(playerRun),
+      });
+      const result = simulateEnemyBattle(input, selectedPoi.spec.enemy);
+
+      showBattleResult(result);
+    } catch (error) {
+      setBattlePhase({ phase: "error", message: formatError(error, "Failed to start battle.") });
+    }
+  }, [
+    clearBattleReplayTimer,
+    dailyDungeon,
+    map.dayId,
+    merkleTree.root,
+    playerRun,
+    publicKey,
+    selectedPoi,
+    selectedPoiState,
+    showBattleResult,
+  ]);
 
   const handleClearEnemy = useCallback(async () => {
-    if (!selectedPoi?.spec.enemy || !selectedPoi.onChain?.initialized) return;
+    if (!selectedPoi?.spec.enemy) return;
+    const onChain = selectedPoiState ?? selectedPoi.onChain;
+    if (!onChain?.initialized) return;
     const battle = battlePhase;
     if (battle.phase !== "result" || !battle.result.won) return;
 
@@ -460,11 +650,12 @@ export default function DailyDungeonPage() {
     } finally {
       setTxPending(null);
     }
-  }, [battlePhase, map.dayId, refreshAfterTx, requireWallet, selectedPoi]);
+  }, [battlePhase, map.dayId, refreshAfterTx, requireWallet, selectedPoi, selectedPoiState]);
 
   const handleRetry = useCallback(() => {
+    clearBattleReplayTimer();
     setBattlePhase({ phase: "idle" });
-  }, []);
+  }, [clearBattleReplayTimer]);
 
   const handleInitShopSlot = useCallback(
     async (slotIndex: number) => {
@@ -541,27 +732,59 @@ export default function DailyDungeonPage() {
   );
 
   const handleStartBossBattle = useCallback(() => {
-    if (!selectedPoi?.spec.boss || !selectedPoi.onChain?.initialized) return;
+    clearBossReplayTimer();
+    setBossBattlePhase({ phase: "preparing" });
 
-    const boss = selectedPoi.spec.boss;
-    const bossAsEnemy: EnemyConfig = {
-      id: boss.id,
-      name: boss.name,
-      level: boss.level,
-      maxHealth: boss.maxHealth,
-      attack: boss.attack,
-      rewardTier: boss.rewardTier,
-    };
+    try {
+      if (!publicKey) throw new Error("Connect wallet first.");
+      if (!playerRun) throw new Error("Enter dungeon first.");
+      if (!selectedPoi?.spec.boss) throw new Error("No boss selected.");
 
-    const result = simulateBattle(bossAsEnemy, 0);
-    const damage = computeBossDamage({
-      baseDamage: result.damageTaken > 0 ? Math.max(10, 100 - result.damageTaken) : 150,
-      blockedDamage: 0,
-      bonusDamage: result.flawless ? 50 : 0,
-      multiplierBps: 10_000,
-    });
-    setBossBattlePhase({ phase: "result", result, damage });
-  }, [selectedPoi]);
+      const onChain = selectedPoiState ?? selectedPoi.onChain;
+      if (!onChain?.initialized) throw new Error("Initialize Location first.");
+
+      const boss = selectedPoi.spec.boss;
+      const bossAsEnemy: EnemyConfig = {
+        id: boss.id,
+        name: boss.name,
+        level: boss.level,
+        maxHealth: boss.maxHealth,
+        attack: boss.attack,
+        rewardTier: boss.rewardTier,
+      };
+      const input = buildBattleInput({
+        encounterKind: "boss",
+        dayId: map.dayId,
+        mapRoot: merkleTree.root,
+        rulesetHash: getRulesetHash(dailyDungeon),
+        player: publicKey.toBase58(),
+        poiId: selectedPoi.spec.id,
+        poiIdHash: bytesToHex(sha256Bytes32(selectedPoi.spec.id)),
+        enemyConfig: bossAsEnemy,
+        clearCount: 0,
+        attemptIndex: playerRun.bossDamage + playerRun.clearedLocations,
+        playerSnapshot: buildPlayerSnapshot(playerRun),
+      });
+      const result = simulateBossBattle(input, bossAsEnemy);
+
+      showBossBattleResult(result);
+    } catch (error) {
+      setBossBattlePhase({
+        phase: "error",
+        message: formatError(error, "Failed to start boss battle."),
+      });
+    }
+  }, [
+    clearBossReplayTimer,
+    dailyDungeon,
+    map.dayId,
+    merkleTree.root,
+    playerRun,
+    publicKey,
+    selectedPoi,
+    selectedPoiState,
+    showBossBattleResult,
+  ]);
 
   const handleInitBossShard = useCallback(async () => {
     if (!selectedPoi?.spec.boss || !selectedPoi.onChain?.initialized) return;
@@ -595,9 +818,15 @@ export default function DailyDungeonPage() {
   }, [dailyDungeon, map.dayId, refreshAfterTx, requireWallet, selectedPoi]);
 
   const handleSubmitBossDamage = useCallback(async () => {
-    if (!selectedPoi?.spec.boss || !selectedPoi.onChain?.initialized) return;
+    if (!selectedPoi?.spec.boss) return;
+    const onChain = selectedPoiState ?? selectedPoi.onChain;
+    if (!onChain?.initialized) return;
     const bossBattle = bossBattlePhase;
     if (bossBattle.phase !== "result") return;
+    if (bossBattle.result.bossDamageScore <= 0) {
+      setBossBattlePhase({ phase: "error", message: "Boss damage must be greater than zero." });
+      return;
+    }
     if (!dailyDungeon) {
       setBossBattlePhase({ phase: "error", message: "Daily dungeon account is not initialized." });
       return;
@@ -610,23 +839,24 @@ export default function DailyDungeonPage() {
     try {
       const { player, signingProgram } = requireWallet();
       const shardIndex = bossShardIndexForPlayer(player, dailyDungeon.bossShardCount);
-      const shard = selectedPoi.onChain.bossShards?.find((entry) => entry.index === shardIndex);
+      const shard = onChain.bossShards?.find((entry) => entry.index === shardIndex);
       if (!shard?.initialized) {
         throw new Error(
           `Boss damage shard #${shardIndex} is not initialized on-chain. Add an init BossDamageShard instruction or initialize the shard before submitting damage.`,
         );
       }
 
+      const damage = bossBattle.result.bossDamageScore;
       const signature = await submitBossDamage(
         signingProgram,
         map.dayId,
         selectedPoi.spec,
         player,
-        bossBattle.damage,
+        damage,
         bossBattle.result,
         dailyDungeon.bossShardCount,
       );
-      setBossBattlePhase({ phase: "success", damage: bossBattle.damage, signature });
+      setBossBattlePhase({ phase: "success", damage, signature });
       setTxSignature(signature);
       await refreshAfterTx();
     } catch (error) {
@@ -639,7 +869,15 @@ export default function DailyDungeonPage() {
     } finally {
       setTxPending(null);
     }
-  }, [bossBattlePhase, dailyDungeon, map.dayId, refreshAfterTx, requireWallet, selectedPoi]);
+  }, [
+    bossBattlePhase,
+    dailyDungeon,
+    map.dayId,
+    refreshAfterTx,
+    requireWallet,
+    selectedPoi,
+    selectedPoiState,
+  ]);
 
   const handleClaimBossNft = useCallback(async () => {
     if (!selectedPoi?.spec.boss || !selectedPoi.onChain?.initialized) return;
@@ -711,35 +949,23 @@ export default function DailyDungeonPage() {
         </div>
         <div className={styles.headerRight}>
           <div className={styles.stats}>
-            <span title="Dungeon status" className={styles.stat}>
-              Chain: {dungeonStatus}
-            </span>
+            <StatPill label="Chain:" value={dungeonStatus} title="Dungeon status" />
             {playerRun ? (
               <>
-                <span title="Energy" className={styles.stat}>
-                  EN {playerRun.energy}
-                </span>
-                <span title="Cleared locations" className={styles.stat}>
-                  CL {playerRun.clearedLocations}
-                </span>
-                <span title="Boss damage" className={styles.stat}>
-                  BD {playerRun.bossDamage}
-                </span>
-                <span title="Items purchased" className={styles.stat}>
-                  IT {playerRun.itemsPurchased}
-                </span>
+                <StatPill label="EN" value={playerRun.energy} title="Energy" />
+                <StatPill label="CL" value={playerRun.clearedLocations} title="Cleared locations" />
+                <StatPill label="BD" value={playerRun.bossDamage} title="Boss damage" />
+                <StatPill label="IT" value={playerRun.itemsPurchased} title="Items purchased" />
               </>
             ) : (
-              <span title="Player run" className={styles.stat}>
-                Run: {playerRunLoading ? "Loading" : "None"}
-              </span>
+              <StatPill
+                label="Run:"
+                value={playerRunLoading ? "Loading" : "None"}
+                title="Player run"
+              />
             )}
-            <span title="Total POIs" className={styles.stat}>
-              POI {map.locations.length}
-            </span>
-            <span title="Map size" className={styles.stat}>
-              {map.width}x{map.height}
-            </span>
+            <StatPill label="POI" value={map.locations.length} title="Total POIs" />
+            <StatPill label="" value={`${map.width}x${map.height}`} title="Map size" />
           </div>
           {wallet.connected && !playerRun && (
             <button
@@ -1105,7 +1331,6 @@ function EnemyContent({
 }) {
   const onCooldown = isOnCooldown(onChain);
   const cooldownSecs = getCooldownSeconds(onChain);
-  const hasEnergy = (playerRun?.energy ?? 0) >= ENEMY_CLEAR_ENERGY_COST;
 
   return (
     <div className={styles.detailSection}>
@@ -1141,57 +1366,23 @@ function EnemyContent({
         <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
           Enter Dungeon
         </button>
-      ) : onCooldown ? (
-        <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
-          Clear Enemy cooldown {formatCooldown(cooldownSecs)}
-        </button>
-      ) : !hasEnergy ? (
-        <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
-          Clear Enemy needs {ENEMY_CLEAR_ENERGY_COST} EN
-        </button>
-      ) : battlePhase.phase === "idle" ? (
-        <button className={styles.btnClear} onClick={onStartBattle} disabled={txPending !== null} style={{ marginTop: 8 }}>
-          Start Battle
-        </button>
-      ) : battlePhase.phase === "simulating" ? (
-        <div className={styles.battleSimulating}>
-          <div className={styles.spinner} />
-          <span>Simulating battle...</span>
-        </div>
-      ) : battlePhase.phase === "result" ? (
-        <div className={styles.battleResult}>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Outcome</span>
-            <span className={styles.metaValue}>{battlePhase.result.won ? "Victory" : "Defeated"}</span>
-          </div>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Turns</span>
-            <span className={styles.metaValue}>{battlePhase.result.turnsTaken}</span>
-          </div>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Damage Taken</span>
-            <span className={styles.metaValue}>{battlePhase.result.damageTaken}</span>
-          </div>
-          {battlePhase.result.won ? (
-            <button className={styles.btnClear} onClick={onClearEnemy} disabled={txPending !== null} style={{ marginTop: 8 }}>
-              {txPending === "clearEnemy" ? "Submitting Clear Enemy..." : "Submit Clear Enemy"}
-            </button>
-          ) : (
-            <button className={styles.btnSecondary} onClick={onRetry} disabled={txPending !== null} style={{ marginTop: 8 }}>
-              Retry
-            </button>
-          )}
-        </div>
-      ) : battlePhase.phase === "submitting" ? (
-        <div className={styles.battleSimulating}>
-          <div className={styles.spinner} />
-          <span>Submitting clear...</span>
-        </div>
-      ) : battlePhase.phase === "success" ? (
-        <div className={styles.initialized}>Cleared: <TxExplorerLink signature={battlePhase.signature} /></div>
-      ) : battlePhase.phase === "error" ? (
-        <div className={styles.battleError}>❌ {battlePhase.message}</div>
-      ) : null}
+      ) : (
+        <BattleArena
+          title="Battle"
+          encounterKind="enemy"
+          enemyName={enemy.name}
+          phase={battlePhase}
+          txPending={txPending !== null}
+          cooldownSeconds={onCooldown ? cooldownSecs : 0}
+          energyCost={ENEMY_CLEAR_ENERGY_COST}
+          playerEnergy={playerRun?.energy}
+          onStart={onStartBattle}
+          onSubmit={onClearEnemy}
+          onRetry={onRetry}
+          explorerUrl={explorerTxUrl}
+          shortSignature={shortSignature}
+        />
+      )}
     </div>
   );
 }
@@ -1424,46 +1615,20 @@ function BossContent({
         <button className={styles.btnInit} onClick={onInitBossShard} disabled={txPending !== null} style={{ marginTop: 8 }}>
           {txPending === "initBossShard" ? "Initializing Boss Shard..." : "Initialize Boss Shard"}
         </button>
-      ) : bossBattlePhase.phase === "idle" ? (
-        <button className={styles.btnClear} onClick={onStartBossBattle} disabled={txPending !== null} style={{ marginTop: 8 }}>
-          Start Boss Battle
-        </button>
-      ) : bossBattlePhase.phase === "simulating" ? (
-        <div className={styles.battleSimulating}>
-          <div className={styles.spinner} />
-          <span>Simulating boss battle...</span>
-        </div>
-      ) : bossBattlePhase.phase === "result" ? (
-        <div className={styles.battleResult}>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Outcome</span>
-            <span className={styles.metaValue}>{bossBattlePhase.result.won ? "Victory" : "Defeated"}</span>
-          </div>
-          <div className={styles.detailMeta}>
-            <span className={styles.metaLabel}>Damage Dealt</span>
-            <span className={styles.metaValue}>{bossBattlePhase.damage}</span>
-          </div>
-          <div className={styles.buttonRow} style={{ marginTop: 8 }}>
-            <button className={styles.btnClear} onClick={onSubmitBossDamage} disabled={txPending !== null}>
-              {txPending === "submitBossDamage" ? "Submitting Boss Damage..." : "Submit Boss Damage"}
-            </button>
-            <button className={styles.btnSecondary} onClick={onStartBossBattle} disabled={txPending !== null}>
-              Retry
-            </button>
-          </div>
-        </div>
-      ) : bossBattlePhase.phase === "submitting" ? (
-        <div className={styles.battleSimulating}>
-          <div className={styles.spinner} />
-          <span>Submitting boss damage...</span>
-        </div>
-      ) : bossBattlePhase.phase === "success" ? (
-        <div className={styles.initialized}>
-          Submitted {bossBattlePhase.damage}: <TxExplorerLink signature={bossBattlePhase.signature} />
-        </div>
-      ) : bossBattlePhase.phase === "error" ? (
-        <div className={styles.battleError}>❌ {bossBattlePhase.message}</div>
-      ) : null}
+      ) : (
+        <BattleArena
+          title="Boss Battle"
+          encounterKind="boss"
+          enemyName={onChain?.bossName ?? boss.name}
+          phase={bossBattlePhase}
+          txPending={txPending !== null}
+          onStart={onStartBossBattle}
+          onSubmit={onSubmitBossDamage}
+          onRetry={onStartBossBattle}
+          explorerUrl={explorerTxUrl}
+          shortSignature={shortSignature}
+        />
+      )}
 
       {onChain?.bossNftClaimed && <div className={styles.initialized}>Claimed</div>}
       {!onChain?.bossNftClaimed && hasContribution && bossNftClaimPhase.phase === "idle" && (

@@ -1,6 +1,7 @@
 import type { DailyDungeonConfig } from "@backpack-dungeon/shared";
 
 export * from "./boss-shards.js";
+export * from "./battle-system.js";
 export * from "./daily-config.js";
 export * from "./daily-map.js";
 export * from "./enemy-scaling.js";
