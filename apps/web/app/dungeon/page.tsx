@@ -4,10 +4,15 @@ import { useAnchorWallet, useWallet } from "@solana/wallet-adapter-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WalletButton } from "./wallet-button";
 import { BattleArena } from "./components/BattleArena";
+import { BattleOverlay, type BattleOverlayPhase } from "./components/battle/BattleOverlay";
 import { StatPill } from "./components/StatPill";
+import { useBackpackInventory } from "./hooks/useBackpackInventory";
 import {
   buildBattleInput,
   buildLocationMerkleTree,
+  computePlayerBattleStats,
+  createBackpackItemFromShopSlot,
+  createBackpackItemFromTreasure,
   createDailyMapInput,
   generateDailyMap,
   getLocationProof,
@@ -17,6 +22,7 @@ import {
   todayDayId,
   type BattlePlayerSnapshotV1,
   type BattleResultV1,
+  type BattleCombatantStatsV1,
   type DailyLocationSpec,
   type DailyMapInput,
 } from "@backpack-dungeon/game-core";
@@ -65,10 +71,15 @@ type TxPhase =
 type BattlePhase =
   | { readonly phase: "idle" }
   | { readonly phase: "preparing" }
-  | { readonly phase: "replaying"; readonly result: BattleResultV1; readonly replayIndex: number }
-  | { readonly phase: "result"; readonly result: BattleResultV1 }
+  | {
+      readonly phase: "replaying";
+      readonly result: BattleResultV1;
+      readonly replayIndex: number;
+      readonly inputClearCount: number;
+    }
+  | { readonly phase: "result"; readonly result: BattleResultV1; readonly inputClearCount: number }
   | { readonly phase: "submitting" }
-  | { readonly phase: "success"; readonly signature: string }
+  | { readonly phase: "success"; readonly signature: string; readonly result: BattleResultV1 }
   | { readonly phase: "error"; readonly message: string };
 
 type ShopActionPhase =
@@ -90,7 +101,7 @@ type BossBattlePhase =
     }
   | { readonly phase: "result"; readonly result: BattleResultV1; readonly damage: number }
   | { readonly phase: "submitting" }
-  | { readonly phase: "success"; readonly damage: number; readonly signature: string }
+  | { readonly phase: "success"; readonly damage: number; readonly signature: string; readonly result: BattleResultV1 }
   | { readonly phase: "error"; readonly message: string };
 
 type TxPending =
@@ -150,7 +161,7 @@ function rewardTierColor(tier: string): string {
 
 function getCooldownSeconds(onChain: PoiOnChainState | null): number {
   if (!onChain?.nextAvailableAt) return 0;
-  return Math.max(0, onChain.nextAvailableAt - Date.now() / 1000);
+  return Math.max(0, onChain.nextAvailableAt - Math.floor(Date.now() / 1000));
 }
 
 function isOnCooldown(onChain: PoiOnChainState | null): boolean {
@@ -163,6 +174,17 @@ function shortSignature(signature: string): string {
 
 function explorerTxUrl(signature: string): string {
   return `https://explorer.solana.com/tx/${signature}?cluster=${EXPLORER_CLUSTER}`;
+}
+
+function formatNextAvailable(nextAvailableAt: number | undefined): string {
+  if (!nextAvailableAt || nextAvailableAt <= 0) return "Ready";
+  if (nextAvailableAt <= Math.floor(Date.now() / 1000)) return "Ready";
+
+  return new Date(nextAvailableAt * 1000).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function shopTxKey(kind: "initShopSlot" | "buyItem", slotIndex: number): TxPending {
@@ -216,6 +238,96 @@ function prefersReducedMotion(): boolean {
   );
 }
 
+function toEnemyOverlayPhase(phase: BattlePhase): BattleOverlayPhase {
+  if (phase.phase === "idle") return { phase: "setup" };
+  if (phase.phase === "preparing") return { phase: "preparing" };
+  if (phase.phase === "replaying") {
+    return {
+      phase: "replaying",
+      replayIndex: phase.replayIndex,
+      result: phase.result,
+    };
+  }
+  if (phase.phase === "result") return { phase: "result", result: phase.result };
+  if (phase.phase === "submitting") return { phase: "submitting" };
+  if (phase.phase === "success") {
+    return { phase: "success", signature: phase.signature, result: phase.result };
+  }
+  return { phase: "error", message: phase.message };
+}
+
+function toBossOverlayPhase(phase: BossBattlePhase): BattleOverlayPhase {
+  if (phase.phase === "idle") return { phase: "setup" };
+  if (phase.phase === "preparing") return { phase: "preparing" };
+  if (phase.phase === "replaying") {
+    return {
+      phase: "replaying",
+      replayIndex: phase.replayIndex,
+      result: phase.result,
+    };
+  }
+  if (phase.phase === "result") return { phase: "result", result: phase.result };
+  if (phase.phase === "submitting") return { phase: "submitting" };
+  if (phase.phase === "success") {
+    return { phase: "success", signature: phase.signature, result: phase.result };
+  }
+  return { phase: "error", message: phase.message };
+}
+
+function buildEnemyCombatantStats(
+  enemy: Pick<EnemyConfig, "attack" | "level" | "maxHealth" | "rewardTier">,
+  onChain: PoiOnChainState | null,
+): BattleCombatantStatsV1 {
+  const level = onChain?.difficultyLevel ?? enemy.level;
+  const attack = onChain?.baseDamage ?? enemy.attack;
+  const maxHealth = onChain?.baseHp ?? enemy.maxHealth;
+  const rank = rewardTierRank(enemy.rewardTier);
+
+  return {
+    attack,
+    critBps: clampBps(800 + level * 35 + rank * 150),
+    defense: Math.max(0, level + Math.floor(attack / 4) + rank * 2),
+    dodgeBps: clampBps(500 + level * 25 + rank * 100),
+    maxHealth,
+    speed: 90 + level * 3 + rank * 4,
+  };
+}
+
+function buildBossCombatantStats(
+  boss: NonNullable<DailyLocationSpec["boss"]>,
+  onChain: PoiOnChainState | null,
+): BattleCombatantStatsV1 {
+  return buildEnemyCombatantStats(
+    {
+      attack: onChain?.baseDamage ?? boss.attack,
+      level: boss.level,
+      maxHealth: onChain?.bossHp ?? boss.maxHealth,
+      rewardTier: boss.rewardTier,
+    },
+    null,
+  );
+}
+
+function rewardTierRank(tier: RewardTier): number {
+  return [
+    RewardTier.Common,
+    RewardTier.Uncommon,
+    RewardTier.Rare,
+    RewardTier.Epic,
+    RewardTier.Legendary,
+  ].indexOf(tier);
+}
+
+function normalizeRewardTier(value: string | undefined, fallback: RewardTier): RewardTier {
+  return Object.values(RewardTier).includes(value as RewardTier)
+    ? (value as RewardTier)
+    : fallback;
+}
+
+function clampBps(value: number): number {
+  return Math.max(0, Math.min(10_000, value));
+}
+
 export default function DailyDungeonPage() {
   const wallet = useWallet();
   const anchorWallet = useAnchorWallet();
@@ -242,6 +354,7 @@ export default function DailyDungeonPage() {
   const [bossBattlePhase, setBossBattlePhase] = useState<BossBattlePhase>({ phase: "idle" });
   const [dailyRewardPhase, setDailyRewardPhase] = useState<TxPhase>({ phase: "idle" });
   const [bossNftClaimPhase, setBossNftClaimPhase] = useState<TxPhase>({ phase: "idle" });
+  const [battleOverlayTarget, setBattleOverlayTarget] = useState<"enemy" | "boss" | null>(null);
 
   const [, setTick] = useState(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -273,6 +386,16 @@ export default function DailyDungeonPage() {
 
   const map = useMemo(() => generateDailyMap(MAP_INPUT), []);
   const merkleTree = useMemo(() => buildLocationMerkleTree(map.locations), [map]);
+  const {
+    inventory,
+    layout,
+    backpackSnapshot,
+    addItem,
+    moveItem,
+    rotateItem,
+    autoPack,
+    hasItemSource,
+  } = useBackpackInventory(map.dayId, publicKeyString);
 
   const poiByPos = useMemo(() => {
     const lookup = new Map<string, DailyLocationSpec>();
@@ -318,18 +441,21 @@ export default function DailyDungeonPage() {
     }
   }, [program, map.dayId]);
 
-  const refreshPlayerRun = useCallback(async () => {
+  const refreshPlayerRun = useCallback(async (): Promise<PlayerRunState | null> => {
     if (!publicKey) {
       setPlayerRun(null);
-      return;
+      return null;
     }
 
     setPlayerRunLoading(true);
     setLoadingChainState(true);
     try {
-      setPlayerRun(await fetchPlayerRun(program, map.dayId, publicKey));
+      const nextPlayerRun = await fetchPlayerRun(program, map.dayId, publicKey);
+      setPlayerRun(nextPlayerRun);
+      return nextPlayerRun;
     } catch (error) {
       setChainError(formatError(error, "Failed to fetch PlayerRun."));
+      return null;
     } finally {
       setPlayerRunLoading(false);
       setLoadingChainState(false);
@@ -337,7 +463,10 @@ export default function DailyDungeonPage() {
   }, [program, map.dayId, publicKey, publicKeyString]);
 
   const loadPoiState = useCallback(
-    async (spec: DailyLocationSpec, merkleProof: ReturnType<typeof getLocationProof>) => {
+    async (
+      spec: DailyLocationSpec,
+      merkleProof: ReturnType<typeof getLocationProof>,
+    ): Promise<PoiOnChainState | null> => {
       setLoadingChainState(true);
       setSelectedPoiState(null);
       setSelectedPoi((current) => ({
@@ -360,6 +489,7 @@ export default function DailyDungeonPage() {
             ? { spec, merkleProof, onChain, loading: false }
             : current,
         );
+        return onChain;
       } catch (error) {
         setSelectedPoi((current) =>
           current?.spec.id === spec.id
@@ -374,6 +504,7 @@ export default function DailyDungeonPage() {
         );
         setSelectedPoiState(null);
         setChainError(formatError(error, "Failed to fetch selected POI chain state."));
+        return null;
       } finally {
         setLoadingChainState(false);
       }
@@ -381,15 +512,15 @@ export default function DailyDungeonPage() {
     [program, map.dayId, publicKey, publicKeyString],
   );
 
-  const refreshSelectedPoi = useCallback(async () => {
-    if (!selectedPoi) return;
-    await loadPoiState(selectedPoi.spec, selectedPoi.merkleProof);
+  const refreshSelectedPoiState = useCallback(async (): Promise<PoiOnChainState | null> => {
+    if (!selectedPoi) return null;
+    return loadPoiState(selectedPoi.spec, selectedPoi.merkleProof);
   }, [selectedPoi, loadPoiState]);
 
   const refreshAfterTx = useCallback(async () => {
     await Promise.all([refreshDailyDungeon(), refreshPlayerRun()]);
-    await refreshSelectedPoi();
-  }, [refreshDailyDungeon, refreshPlayerRun, refreshSelectedPoi]);
+    await refreshSelectedPoiState();
+  }, [refreshDailyDungeon, refreshPlayerRun, refreshSelectedPoiState]);
 
   useEffect(() => {
     void refreshDailyDungeon();
@@ -406,7 +537,11 @@ export default function DailyDungeonPage() {
     }
 
     if (battlePhase.replayIndex >= battlePhase.result.log.length - 1) {
-      setBattlePhase({ phase: "result", result: battlePhase.result });
+      setBattlePhase({
+        phase: "result",
+        result: battlePhase.result,
+        inputClearCount: battlePhase.inputClearCount,
+      });
       return;
     }
 
@@ -422,6 +557,21 @@ export default function DailyDungeonPage() {
 
     return () => clearBattleReplayTimer();
   }, [battlePhase, clearBattleReplayTimer]);
+
+  useEffect(() => {
+    if (battlePhase.phase !== "result" && battlePhase.phase !== "replaying") return;
+    if (selectedPoi?.spec.kind !== LocationKind.Enemy) return;
+    if (selectedPoiState?.clearCount === undefined) return;
+    if (battlePhase.inputClearCount === selectedPoiState.clearCount) return;
+
+    clearBattleReplayTimer();
+    setBattlePhase({ phase: "idle" });
+  }, [
+    battlePhase,
+    clearBattleReplayTimer,
+    selectedPoi?.spec.kind,
+    selectedPoiState?.clearCount,
+  ]);
 
   useEffect(() => {
     if (bossBattlePhase.phase !== "replaying") {
@@ -456,6 +606,7 @@ export default function DailyDungeonPage() {
     clearBossReplayTimer();
     setBattlePhase({ phase: "idle" });
     setBossBattlePhase({ phase: "idle" });
+    setBattleOverlayTarget(null);
     if (selectedPoi) {
       void loadPoiState(selectedPoi.spec, selectedPoi.merkleProof);
     }
@@ -473,6 +624,7 @@ export default function DailyDungeonPage() {
       setDailyRewardPhase({ phase: "idle" });
       setBossNftClaimPhase({ phase: "idle" });
       setInitLocationPhase({ phase: "idle" });
+      setBattleOverlayTarget(null);
       setSelectedPoiState(null);
       setTxSignature(null);
       void loadPoiState(spec, proof);
@@ -491,14 +643,14 @@ export default function DailyDungeonPage() {
   }, [anchorWallet, publicKey]);
 
   const showBattleResult = useCallback(
-    (result: BattleResultV1) => {
+    (result: BattleResultV1, inputClearCount: number) => {
       clearBattleReplayTimer();
       if (prefersReducedMotion() || result.log.length === 0) {
-        setBattlePhase({ phase: "result", result });
+        setBattlePhase({ phase: "result", result, inputClearCount });
         return;
       }
 
-      setBattlePhase({ phase: "replaying", result, replayIndex: 0 });
+      setBattlePhase({ phase: "replaying", result, replayIndex: 0, inputClearCount });
     },
     [clearBattleReplayTimer],
   );
@@ -572,11 +724,12 @@ export default function DailyDungeonPage() {
     setBattlePhase({ phase: "preparing" });
 
     try {
+      if (txPending !== null) throw new Error("A transaction is already pending.");
       if (!publicKey) throw new Error("Connect wallet first.");
       if (!playerRun) throw new Error("Enter dungeon first.");
       if (!selectedPoi?.spec.enemy) throw new Error("No enemy selected.");
 
-      const onChain = selectedPoiState ?? selectedPoi.onChain;
+      const onChain = selectedPoiState;
       if (!onChain?.initialized) throw new Error("Initialize Location first.");
       if (isOnCooldown(onChain)) {
         throw new Error(`Clear Enemy cooldown ${formatCooldown(getCooldownSeconds(onChain))}.`);
@@ -585,7 +738,7 @@ export default function DailyDungeonPage() {
         throw new Error("Not enough energy.");
       }
 
-      const clearCount = onChain.clearCount ?? 0;
+      const clearCount = selectedPoiState?.clearCount ?? 0;
       const input = buildBattleInput({
         encounterKind: "enemy",
         dayId: map.dayId,
@@ -596,17 +749,19 @@ export default function DailyDungeonPage() {
         poiIdHash: bytesToHex(sha256Bytes32(selectedPoi.spec.id)),
         enemyConfig: selectedPoi.spec.enemy,
         clearCount,
-        attemptIndex: playerRun.clearedLocations + clearCount,
+        attemptIndex: (playerRun?.clearedLocations ?? 0) + clearCount,
         playerSnapshot: buildPlayerSnapshot(playerRun),
+        backpack: backpackSnapshot,
       });
       const result = simulateEnemyBattle(input, selectedPoi.spec.enemy);
 
-      showBattleResult(result);
+      showBattleResult(result, clearCount);
     } catch (error) {
       setBattlePhase({ phase: "error", message: formatError(error, "Failed to start battle.") });
     }
   }, [
     clearBattleReplayTimer,
+    backpackSnapshot,
     dailyDungeon,
     map.dayId,
     merkleTree.root,
@@ -615,14 +770,19 @@ export default function DailyDungeonPage() {
     selectedPoi,
     selectedPoiState,
     showBattleResult,
+    txPending,
   ]);
 
   const handleClearEnemy = useCallback(async () => {
     if (!selectedPoi?.spec.enemy) return;
-    const onChain = selectedPoiState ?? selectedPoi.onChain;
+    const onChain = selectedPoiState;
     if (!onChain?.initialized) return;
     const battle = battlePhase;
     if (battle.phase !== "result" || !battle.result.won) return;
+    if (battle.inputClearCount !== (selectedPoiState?.clearCount ?? 0)) {
+      setBattlePhase({ phase: "idle" });
+      return;
+    }
 
     setBattlePhase({ phase: "submitting" });
     setTxPending("clearEnemy");
@@ -637,9 +797,10 @@ export default function DailyDungeonPage() {
         player,
         battle.result,
       );
-      setBattlePhase({ phase: "success", signature });
       setTxSignature(signature);
-      await refreshAfterTx();
+      await Promise.all([refreshDailyDungeon(), refreshPlayerRun(), refreshSelectedPoiState()]);
+      clearBattleReplayTimer();
+      setBattlePhase({ phase: "success", signature, result: battle.result });
     } catch (error) {
       const message = formatError(error, "Failed to submit enemy clear.");
       setBattlePhase({
@@ -650,12 +811,50 @@ export default function DailyDungeonPage() {
     } finally {
       setTxPending(null);
     }
-  }, [battlePhase, map.dayId, refreshAfterTx, requireWallet, selectedPoi, selectedPoiState]);
+  }, [
+    battlePhase,
+    clearBattleReplayTimer,
+    map.dayId,
+    refreshDailyDungeon,
+    refreshPlayerRun,
+    refreshSelectedPoiState,
+    requireWallet,
+    selectedPoi,
+    selectedPoiState,
+  ]);
 
   const handleRetry = useCallback(() => {
     clearBattleReplayTimer();
     setBattlePhase({ phase: "idle" });
   }, [clearBattleReplayTimer]);
+
+  const handleBossRetry = useCallback(() => {
+    clearBossReplayTimer();
+    setBossBattlePhase({ phase: "idle" });
+  }, [clearBossReplayTimer]);
+
+  const handleOpenBattleOverlay = useCallback(() => {
+    clearBattleReplayTimer();
+    setBattlePhase({ phase: "idle" });
+    setBattleOverlayTarget("enemy");
+  }, [clearBattleReplayTimer]);
+
+  const handleOpenBossOverlay = useCallback(() => {
+    clearBossReplayTimer();
+    setBossBattlePhase({ phase: "idle" });
+    setBattleOverlayTarget("boss");
+  }, [clearBossReplayTimer]);
+
+  const handleCloseBattleOverlay = useCallback(() => {
+    if (
+      (battleOverlayTarget === "enemy" && battlePhase.phase === "submitting") ||
+      (battleOverlayTarget === "boss" && bossBattlePhase.phase === "submitting")
+    ) {
+      return;
+    }
+
+    setBattleOverlayTarget(null);
+  }, [battleOverlayTarget, battlePhase.phase, bossBattlePhase.phase]);
 
   const handleInitShopSlot = useCallback(
     async (slotIndex: number) => {
@@ -698,6 +897,8 @@ export default function DailyDungeonPage() {
         return;
       }
 
+      const slot = selectedPoi.spec.shop.itemSlots[slotIndex];
+      if (!slot) return;
       const stockInfo = selectedPoi.onChain.stock[slotIndex];
       if (!stockInfo?.initialized || !stockInfo.expectedPrice || (stockInfo.available ?? 0) <= 0) {
         return;
@@ -717,6 +918,21 @@ export default function DailyDungeonPage() {
           stockInfo.expectedPrice,
           player,
         );
+        addItem(
+          createBackpackItemFromShopSlot(
+            {
+              ...slot,
+              itemId: stockInfo.itemId ?? slot.itemId,
+              rewardTier: normalizeRewardTier(stockInfo.rewardTier, slot.rewardTier),
+            },
+            {
+              dayId: map.dayId,
+              player: player.toBase58(),
+              purchaseIndex: stockInfo.soldCount ?? slotIndex,
+              signature,
+            },
+          ),
+        );
         setShopActionPhase({ phase: "bought", slotIndex, signature });
         setTxSignature(signature);
         await refreshAfterTx();
@@ -728,7 +944,7 @@ export default function DailyDungeonPage() {
         setTxPending(null);
       }
     },
-    [map.dayId, playerRun, refreshAfterTx, requireWallet, selectedPoi],
+    [addItem, map.dayId, playerRun, refreshAfterTx, requireWallet, selectedPoi],
   );
 
   const handleStartBossBattle = useCallback(() => {
@@ -764,6 +980,7 @@ export default function DailyDungeonPage() {
         clearCount: 0,
         attemptIndex: playerRun.bossDamage + playerRun.clearedLocations,
         playerSnapshot: buildPlayerSnapshot(playerRun),
+        backpack: backpackSnapshot,
       });
       const result = simulateBossBattle(input, bossAsEnemy);
 
@@ -776,6 +993,7 @@ export default function DailyDungeonPage() {
     }
   }, [
     clearBossReplayTimer,
+    backpackSnapshot,
     dailyDungeon,
     map.dayId,
     merkleTree.root,
@@ -856,7 +1074,7 @@ export default function DailyDungeonPage() {
         bossBattle.result,
         dailyDungeon.bossShardCount,
       );
-      setBossBattlePhase({ phase: "success", damage, signature });
+      setBossBattlePhase({ phase: "success", damage, signature, result: bossBattle.result });
       setTxSignature(signature);
       await refreshAfterTx();
     } catch (error) {
@@ -917,7 +1135,26 @@ export default function DailyDungeonPage() {
       if (!selectedPoi) throw new Error("No location selected.");
       const { player, signingProgram } = requireWallet();
       const poiIdHash = sha256Bytes32(selectedPoi.spec.id);
+      const sourceRef = bytesToHex(poiIdHash);
       const signature = await claimDailyReward(signingProgram, map.dayId, player, poiIdHash);
+      if (!hasItemSource("treasure", sourceRef)) {
+        addItem(
+          createBackpackItemFromTreasure(
+            {
+              id: selectedPoi.spec.id,
+              poiId: selectedPoi.spec.id,
+              poiIdHash: sourceRef,
+              rewardTier: selectedPoi.spec.rewardTier ?? RewardTier.Common,
+              sourceRef,
+            },
+            {
+              dayId: map.dayId,
+              player: player.toBase58(),
+              sourceRef,
+            },
+          ),
+        );
+      }
       setDailyRewardPhase({ phase: "success", signature });
       setTxSignature(signature);
       await refreshAfterTx();
@@ -931,7 +1168,7 @@ export default function DailyDungeonPage() {
     } finally {
       setTxPending(null);
     }
-  }, [map.dayId, refreshAfterTx, requireWallet, selectedPoi]);
+  }, [addItem, hasItemSource, map.dayId, refreshAfterTx, requireWallet, selectedPoi]);
 
   const dungeonStatus = dungeonLoading
     ? "Loading"
@@ -939,6 +1176,13 @@ export default function DailyDungeonPage() {
       ? dailyDungeon.status
       : "Not initialized";
   const rootMatches = !dailyDungeon || dailyDungeon.mapRoot === merkleTree.root;
+  const selectedOnChain = selectedPoiState ?? selectedPoi?.onChain ?? null;
+  const selectedEnemy = selectedPoi?.spec.kind === LocationKind.Enemy ? selectedPoi.spec.enemy : undefined;
+  const selectedBoss = selectedPoi?.spec.kind === LocationKind.Boss ? selectedPoi.spec.boss : undefined;
+  const playerStats = playerRun
+    ? computePlayerBattleStats(buildPlayerSnapshot(playerRun), backpackSnapshot)
+    : undefined;
+  const playerDisplayName = publicKeyString ? shortSignature(publicKeyString) : "Player";
 
   return (
     <div className={styles.page}>
@@ -1022,17 +1266,20 @@ export default function DailyDungeonPage() {
               const spec = cell.poi;
               const isSelected = selectedPoi?.spec.id === spec.id;
               const isHovered = hoveredPoi?.id === spec.id;
+              const tileState = isSelected ? selectedPoiState ?? selectedPoi?.onChain ?? null : null;
+              const tileLocked = spec.kind === LocationKind.Enemy && isOnCooldown(tileState);
               return (
                 <button
                   key={`${cell.x}-${cell.y}`}
-                  className={`${styles.poi} ${isSelected ? styles.poiSelected : ""} ${isHovered ? styles.poiHovered : ""}`}
+                  className={`${styles.poi} ${isSelected ? styles.poiSelected : ""} ${isHovered ? styles.poiHovered : ""} ${tileLocked ? styles.poiLocked : ""}`}
                   style={{ borderColor: POI_COLORS[spec.kind] }}
                   onClick={() => handlePoiClick(spec)}
                   onMouseEnter={() => setHoveredPoi(spec)}
                   onMouseLeave={() => setHoveredPoi(null)}
-                  title={`${spec.kind}: ${spec.id} (${cell.x}, ${cell.y})`}
+                  title={`${spec.kind}: ${spec.id} (${cell.x}, ${cell.y})${tileLocked ? ` - Locked for ${formatCooldown(getCooldownSeconds(tileState))}` : ""}`}
                 >
                   <span className={styles.poiIcon}>{POI_ICONS[spec.kind]}</span>
+                  {tileLocked && <span className={styles.poiLock} aria-hidden="true">🔒</span>}
                 </button>
               );
             })}
@@ -1060,14 +1307,14 @@ export default function DailyDungeonPage() {
               selectedBossShardIndex={selectedBossShardIndex}
               onEnterDungeon={handleEnterDungeon}
               battlePhase={battlePhase}
-              onStartBattle={handleStartBattle}
+              onStartBattle={handleOpenBattleOverlay}
               onClearEnemy={handleClearEnemy}
               onRetry={handleRetry}
               shopActionPhase={shopActionPhase}
               onInitShopSlot={handleInitShopSlot}
               onBuyItem={handleBuyItem}
               bossBattlePhase={bossBattlePhase}
-              onStartBossBattle={handleStartBossBattle}
+              onStartBossBattle={handleOpenBossOverlay}
               onInitBossShard={handleInitBossShard}
               onSubmitBossDamage={handleSubmitBossDamage}
               dailyRewardPhase={dailyRewardPhase}
@@ -1083,6 +1330,59 @@ export default function DailyDungeonPage() {
           )}
         </aside>
       </div>
+
+      {selectedEnemy && (
+        <BattleOverlay
+          open={battleOverlayTarget === "enemy"}
+          encounterKind="enemy"
+          title={`Battle: ${selectedEnemy.name}`}
+          enemyName={selectedEnemy.name}
+          enemyLevel={selectedOnChain?.difficultyLevel ?? selectedEnemy.level}
+          playerName={playerDisplayName}
+          phase={toEnemyOverlayPhase(battlePhase)}
+          playerStats={playerStats}
+          enemyStats={buildEnemyCombatantStats(selectedEnemy, selectedOnChain)}
+          cooldownSeconds={isOnCooldown(selectedOnChain) ? getCooldownSeconds(selectedOnChain) : 0}
+          energyCost={ENEMY_CLEAR_ENERGY_COST}
+          playerEnergy={playerRun?.energy}
+          backpackLayout={layout}
+          inventory={inventory}
+          onClose={handleCloseBattleOverlay}
+          onStart={handleStartBattle}
+          onSubmit={handleClearEnemy}
+          onRetry={handleRetry}
+          onMoveItem={moveItem}
+          onRotateItem={rotateItem}
+          onAutoPack={autoPack}
+          explorerUrl={explorerTxUrl}
+          shortSignature={shortSignature}
+        />
+      )}
+
+      {selectedBoss && (
+        <BattleOverlay
+          open={battleOverlayTarget === "boss"}
+          encounterKind="boss"
+          title={`Raid: ${selectedOnChain?.bossName ?? selectedBoss.name}`}
+          enemyName={selectedOnChain?.bossName ?? selectedBoss.name}
+          enemyLevel={selectedBoss.level}
+          playerName={playerDisplayName}
+          phase={toBossOverlayPhase(bossBattlePhase)}
+          playerStats={playerStats}
+          enemyStats={buildBossCombatantStats(selectedBoss, selectedOnChain)}
+          backpackLayout={layout}
+          inventory={inventory}
+          onClose={handleCloseBattleOverlay}
+          onStart={handleStartBossBattle}
+          onSubmit={handleSubmitBossDamage}
+          onRetry={handleBossRetry}
+          onMoveItem={moveItem}
+          onRotateItem={rotateItem}
+          onAutoPack={autoPack}
+          explorerUrl={explorerTxUrl}
+          shortSignature={shortSignature}
+        />
+      )}
     </div>
   );
 }
@@ -1331,6 +1631,9 @@ function EnemyContent({
 }) {
   const onCooldown = isOnCooldown(onChain);
   const cooldownSecs = getCooldownSeconds(onChain);
+  const nextAvailableAt = onChain?.nextAvailableAt;
+  const battleStateBlocked =
+    txPending !== null || !walletConnected || !hasPlayerRun || !onChain?.initialized;
 
   return (
     <div className={styles.detailSection}>
@@ -1356,9 +1659,23 @@ function EnemyContent({
         <span className={styles.metaValue}>{onChain?.difficultyLevel ?? enemy.level}</span>
       </div>
       <div className={styles.detailMeta}>
+        <span className={styles.metaLabel}>Next Available</span>
+        <span className={styles.metaValue}>{formatNextAvailable(nextAvailableAt)}</span>
+      </div>
+      <div className={styles.detailMeta}>
+        <span className={styles.metaLabel}>Cooldown</span>
+        <span className={styles.metaValue}>{formatCooldown(cooldownSecs)}</span>
+      </div>
+      <div className={styles.detailMeta}>
         <span className={styles.metaLabel}>Valuable Cap</span>
         <span className={styles.metaValue}>{onChain?.valuableClearCap ?? "-"}</span>
       </div>
+
+      {onCooldown && (
+        <div className={styles.cooldownNotice}>
+          Enemy recovering / Locked for {formatCooldown(cooldownSecs)}
+        </div>
+      )}
 
       {!walletConnected ? (
         <ConnectWalletAction />
@@ -1372,10 +1689,11 @@ function EnemyContent({
           encounterKind="enemy"
           enemyName={enemy.name}
           phase={battlePhase}
-          txPending={txPending !== null}
+          txPending={battleStateBlocked}
           cooldownSeconds={onCooldown ? cooldownSecs : 0}
           energyCost={ENEMY_CLEAR_ENERGY_COST}
           playerEnergy={playerRun?.energy}
+          idleActionLabel="Open Battle"
           onStart={onStartBattle}
           onSubmit={onClearEnemy}
           onRetry={onRetry}
@@ -1622,6 +1940,7 @@ function BossContent({
           enemyName={onChain?.bossName ?? boss.name}
           phase={bossBattlePhase}
           txPending={txPending !== null}
+          idleActionLabel="Open Raid"
           onStart={onStartBossBattle}
           onSubmit={onSubmitBossDamage}
           onRetry={onStartBossBattle}

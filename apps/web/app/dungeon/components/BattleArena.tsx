@@ -31,6 +31,7 @@ export interface BattleArenaProps {
   readonly cooldownSeconds?: number;
   readonly energyCost?: number;
   readonly playerEnergy?: number;
+  readonly idleActionLabel?: string;
   readonly onStart: () => void;
   readonly onSubmit: () => void;
   readonly onRetry: () => void;
@@ -51,6 +52,7 @@ export function BattleArena({
   cooldownSeconds = 0,
   energyCost,
   playerEnergy,
+  idleActionLabel,
   onStart,
   onSubmit,
   onRetry,
@@ -75,9 +77,7 @@ export function BattleArena({
     ? `Cooldown ${formatCooldown(cooldownSeconds)}`
     : energyMissing
       ? "Not enough energy"
-      : encounterKind === "boss"
-        ? "Start Boss Battle"
-        : "Start Battle";
+      : idleActionLabel ?? (encounterKind === "boss" ? "Start Boss Battle" : "Start Battle");
 
   return (
     <div className={styles.battleArena}>

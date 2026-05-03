@@ -5,7 +5,7 @@ import { assertRandomSeed } from "./rng.js";
 export const DEFAULT_DAILY_MAP_RANDOM_SEED = 20_260_426;
 
 export const DEFAULT_DAILY_MAP_PARAMETERS = Object.freeze({
-  bossCount: 2,
+  bossCount: 1,
   enemyCount: 12,
   height: 20,
   poiDensity: 0.06,

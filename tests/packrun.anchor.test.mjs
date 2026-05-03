@@ -37,7 +37,7 @@ const RANDOM_SEED = 20_260_425;
 const DAY_ID = process.env.PACKRUN_TEST_DAY_ID ?? `test-${Date.now().toString(36).slice(-8)}`;
 
 const BASE_INPUT = Object.freeze({
-  bossCount: 2,
+  bossCount: 1,
   dayId: DAY_ID,
   enemyCount: 12,
   height: 20,
@@ -190,6 +190,15 @@ function assertAnchorEnumVariant(value, variant) {
   assert.deepEqual(value?.[variant], {});
 }
 
+function anchorErrorText(error) {
+  return [
+    error?.message,
+    error?.error?.errorCode?.code,
+    error?.error?.errorMessage,
+    ...(error?.logs ?? []),
+  ].filter(Boolean).join("\n");
+}
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 // Use the default Anchor provider (reads wallet from Anchor.toml config)
@@ -326,7 +335,10 @@ test("anchor: init location from merkle (enemy)", async () => {
   assert.equal(enemy.level, enemyLoc.enemy.level);
   assert.equal(enemy.baseHp, enemyLoc.enemy.maxHealth);
   assert.equal(enemy.baseDamage, enemyLoc.enemy.attack);
+  assert.equal(enemy.difficultyLevel, enemyLoc.enemy.level);
   assert.equal(enemy.clearCount.toString(), "0");
+  assert.equal(enemy.baseCooldownSeconds.toNumber(), 60);
+  assert.equal(enemy.nextAvailableAt.toNumber(), 0);
 });
 
 test("anchor: clear enemy", async () => {
@@ -354,6 +366,8 @@ test("anchor: clear enemy", async () => {
   // No proof URI hash
   const proofUriHash = null;
 
+  const beforeClearUnix = Math.floor(Date.now() / 1_000);
+
   await program.methods
     .clearEnemy(
       Array.from(battleResultHash),
@@ -373,22 +387,49 @@ test("anchor: clear enemy", async () => {
 
   // 1. Player run: energy decreased, cleared_locations incremented
   const run = await program.account.playerRun.fetch(runPda);
-  assert.ok(run.energy < 100, `Expected energy < 100, got ${run.energy}`);
+  assert.equal(run.energy, 95);
   assert.equal(run.clearedLocations, 1);
+  assert.equal(run.commonLootCount, 1);
 
-  // 2. Enemy location: clear_count incremented, next_available_at set
+  // 2. Enemy location: clear_count incremented, difficulty increased, cooldown set
   const enemy = await program.account.enemyLocation.fetch(enemyPdaKey);
   assert.equal(enemy.clearCount.toString(), "1");
   assert.ok(
-    enemy.nextAvailableAt.toNumber() > 0,
-    `Expected next_available_at > 0, got ${enemy.nextAvailableAt}`
+    enemy.difficultyLevel > enemyLoc.enemy.level,
+    `Expected difficulty_level > ${enemyLoc.enemy.level}, got ${enemy.difficultyLevel}`
+  );
+  assert.ok(
+    enemy.nextAvailableAt.toNumber() > beforeClearUnix,
+    `Expected next_available_at > ${beforeClearUnix}, got ${enemy.nextAvailableAt}`
   );
 
-  // 3. Location account remains available; cooldown is tracked on EnemyLocation
+  // 3. Immediate second clear is blocked by EnemyLocation cooldown
+  await assert.rejects(
+    () => program.methods
+      .clearEnemy(
+        Array.from(battleResultHash),
+        performanceSummary,
+        proofUriHash,
+      )
+      .accounts({
+        player: wallet.publicKey,
+        dailyDungeon: dungeonPda,
+        playerRun: runPda,
+        locationAccount: locationPdaKey,
+        enemyLocation: enemyPdaKey,
+      })
+      .rpc(),
+    (error) => {
+      assert.match(anchorErrorText(error), /EnemyOnCooldown|enemy is still on cooldown/i);
+      return true;
+    }
+  );
+
+  // 4. Location account remains available; cooldown is tracked on EnemyLocation
   const location = await program.account.locationAccount.fetch(locationPdaKey);
   assertAnchorEnumVariant(location.status, "available");
 
-  // 4. Daily dungeon: initialized account counters remain unchanged by clearing
+  // 5. Daily dungeon: initialized account counters remain unchanged by clearing
   const dungeon = await program.account.dailyDungeon.fetch(dungeonPda);
   assert.equal(dungeon.locationCount, 1);
   assert.equal(dungeon.enemyCount, 1);

@@ -428,6 +428,7 @@ pub mod packrun {
         validate_clear_enemy(
             &ctx.accounts.daily_dungeon,
             &ctx.accounts.location_account,
+            ctx.accounts.location_account.key(),
             &ctx.accounts.enemy_location,
             &ctx.accounts.player_run,
             now,
@@ -1604,6 +1605,7 @@ fn validate_init_shop_item_slot(
 fn validate_clear_enemy(
     dungeon: &DailyDungeon,
     location: &LocationAccount,
+    location_key: Pubkey,
     enemy: &EnemyLocation,
     player_run: &PlayerRun,
     now: i64,
@@ -1621,6 +1623,10 @@ fn validate_clear_enemy(
     require!(
         location.kind == LocationKind::Enemy,
         PackrunError::LocationIsNotEnemy
+    );
+    require!(
+        enemy.location == location_key,
+        PackrunError::InvalidEnemyLocation
     );
     require!(
         now >= enemy.next_available_at,
@@ -2105,69 +2111,96 @@ fn apply_clear_enemy_state(
     player_run: &mut PlayerRun,
     now: i64,
 ) -> Result<ClearEnemyOutcome> {
-    player_run.energy = player_run
+    let energy_after = player_run
         .energy
         .checked_sub(DEFAULT_ENEMY_CLEAR_ENERGY_COST)
         .ok_or(error!(PackrunError::InsufficientEnergy))?;
-    enemy.clear_count = enemy
-        .clear_count
-        .checked_add(1)
-        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
-    enemy.difficulty_level = compute_enemy_difficulty_level(enemy.level, enemy.clear_count)?;
-    enemy.next_available_at = now
-        .checked_add(compute_enemy_cooldown_seconds(
-            enemy.base_cooldown_seconds,
-            enemy.clear_count,
-        )?)
-        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
 
-    player_run.cleared_locations = player_run
+    let old_clear_count = enemy.clear_count;
+    let clear_count_after = old_clear_count
+        .checked_add(1)
+        .ok_or(error!(PackrunError::EnemyClearOverflow))?;
+    let clear_count_after_u16 =
+        u16::try_from(clear_count_after).map_err(|_| error!(PackrunError::EnemyClearOverflow))?;
+    let difficulty_level =
+        compute_enemy_difficulty_level(enemy.level, clear_count_after_u16)?;
+    let cooldown_seconds = compute_enemy_cooldown_seconds(
+        enemy.base_cooldown_seconds,
+        clear_count_after_u16,
+    )?;
+    let next_available_at = now
+        .checked_add(cooldown_seconds)
+        .ok_or(error!(PackrunError::EnemyClearOverflow))?;
+
+    let cleared_locations_after = player_run
         .cleared_locations
         .checked_add(1)
-        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
-    player_run.common_loot_count = player_run
+        .ok_or(error!(PackrunError::EnemyClearOverflow))?;
+    let common_loot_count_after = player_run
         .common_loot_count
         .checked_add(1)
-        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+        .ok_or(error!(PackrunError::EnemyClearOverflow))?;
 
     let rare_eligibility_points_awarded =
-        compute_rare_eligibility_points(enemy.clear_count, enemy.valuable_clear_cap);
-    player_run.rare_eligibility_points = player_run
+        compute_rare_eligibility_points(clear_count_after, enemy.valuable_clear_cap);
+    let rare_eligibility_points_after = player_run
         .rare_eligibility_points
         .checked_add(rare_eligibility_points_awarded)
-        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+        .ok_or(error!(PackrunError::EnemyClearOverflow))?;
+
+    enemy.clear_count = clear_count_after;
+    enemy.difficulty_level = difficulty_level;
+    enemy.next_available_at = next_available_at;
+    player_run.energy = energy_after;
+    player_run.cleared_locations = cleared_locations_after;
+    player_run.common_loot_count = common_loot_count_after;
+    player_run.rare_eligibility_points = rare_eligibility_points_after;
 
     Ok(ClearEnemyOutcome {
-        clear_count: enemy.clear_count,
-        difficulty_level: enemy.difficulty_level,
+        clear_count: clear_count_after,
+        difficulty_level,
         energy_spent: DEFAULT_ENEMY_CLEAR_ENERGY_COST,
-        next_available_at: enemy.next_available_at,
+        next_available_at,
         rare_eligibility_points_awarded,
     })
 }
 
-fn compute_enemy_difficulty_level(base_level: u16, clear_count: u64) -> Result<u16> {
-    let clear_bonus = clear_count.min(u16::MAX as u64) as u16;
-    base_level
-        .checked_add(clear_bonus)
-        .ok_or(error!(PackrunError::ArithmeticOverflow))
+fn compute_enemy_difficulty_level(base_level: u16, clear_count_after: u16) -> Result<u16> {
+    Ok(base_level.saturating_add(clear_count_after))
 }
 
-fn compute_enemy_cooldown_seconds(base_cooldown_seconds: i64, clear_count: u64) -> Result<i64> {
+fn compute_enemy_cooldown_seconds(
+    base_cooldown_seconds: i64,
+    clear_count_after: u16,
+) -> Result<i64> {
     let base = if base_cooldown_seconds > 0 {
         base_cooldown_seconds
     } else {
         DEFAULT_ENEMY_BASE_COOLDOWN_SECONDS
     };
-    let clear_count =
-        i64::try_from(clear_count).map_err(|_| error!(PackrunError::ArithmeticOverflow))?;
-    base.checked_mul(100 + clear_count * 5)
-        .and_then(|value| value.checked_div(100))
-        .ok_or(error!(PackrunError::ArithmeticOverflow))
+    let denominator =
+        i64::try_from(BPS_DENOMINATOR).map_err(|_| error!(PackrunError::EnemyClearOverflow))?;
+    let clear_bonus_bps = i64::from(clear_count_after)
+        .checked_mul(500)
+        .ok_or(error!(PackrunError::EnemyClearOverflow))?;
+    let multiplier_bps = denominator
+        .checked_add(clear_bonus_bps)
+        .ok_or(error!(PackrunError::EnemyClearOverflow))?;
+    let numerator = base
+        .checked_mul(multiplier_bps)
+        .ok_or(error!(PackrunError::EnemyClearOverflow))?;
+    numerator
+        .checked_add(
+            denominator
+                .checked_sub(1)
+                .ok_or(error!(PackrunError::EnemyClearOverflow))?,
+        )
+        .and_then(|value| value.checked_div(denominator))
+        .ok_or(error!(PackrunError::EnemyClearOverflow))
 }
 
 fn compute_rare_eligibility_points(clear_count: u64, valuable_clear_cap: u16) -> u32 {
-    if valuable_clear_cap == 0 || clear_count >= valuable_clear_cap as u64 {
+    if valuable_clear_cap == 0 || clear_count > valuable_clear_cap as u64 {
         return 0;
     }
 
@@ -2502,6 +2535,8 @@ pub enum PackrunError {
     LocationIsNotEnemy,
     #[msg("enemy is still on cooldown.")]
     EnemyOnCooldown,
+    #[msg("enemy clear state overflowed.")]
+    EnemyClearOverflow,
     #[msg("player does not have enough energy.")]
     InsufficientEnergy,
     #[msg("player has exceeded the daily enemy clear limit.")]
@@ -2767,7 +2802,37 @@ mod tests {
         enemy.next_available_at = 1_600;
         let player_run = test_player_run();
 
-        assert!(validate_clear_enemy(&dungeon, &location, &enemy, &player_run, 1_500).is_err());
+        assert!(
+            validate_clear_enemy(
+                &dungeon,
+                &location,
+                Pubkey::default(),
+                &enemy,
+                &player_run,
+                1_500,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_clear_enemy_for_mismatched_enemy_location() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_enemy_location_account();
+        let enemy = test_enemy_location();
+        let player_run = test_player_run();
+
+        assert!(
+            validate_clear_enemy(
+                &dungeon,
+                &location,
+                Pubkey::new_unique(),
+                &enemy,
+                &player_run,
+                1_500,
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -2782,6 +2847,7 @@ mod tests {
         assert!(enemy.difficulty_level > previous_difficulty);
         assert_eq!(outcome.difficulty_level, enemy.difficulty_level);
         assert!(enemy.next_available_at > 1_500);
+        assert_eq!(enemy.next_available_at, 1_563);
         assert_eq!(
             player_run.energy,
             DEFAULT_PLAYER_RUN_ENERGY - DEFAULT_ENEMY_CLEAR_ENERGY_COST
@@ -2820,7 +2886,7 @@ mod tests {
     }
 
     #[test]
-    fn clear_after_valuable_clear_cap_awards_zero_rare_eligibility() {
+    fn clear_at_valuable_clear_cap_still_awards_rare_eligibility() {
         let mut enemy = test_enemy_location();
         enemy.clear_count = DEFAULT_VALUABLE_CLEAR_CAP as u64 - 1;
         let mut player_run = test_player_run();
@@ -2828,6 +2894,26 @@ mod tests {
         let outcome = apply_clear_enemy_state(&mut enemy, &mut player_run, 1_500).unwrap();
 
         assert_eq!(enemy.clear_count, DEFAULT_VALUABLE_CLEAR_CAP as u64);
+        assert_eq!(player_run.common_loot_count, 1);
+        assert_eq!(
+            outcome.rare_eligibility_points_awarded,
+            DEFAULT_RARE_ELIGIBILITY_POINTS_PER_CLEAR
+        );
+        assert_eq!(
+            player_run.rare_eligibility_points,
+            DEFAULT_RARE_ELIGIBILITY_POINTS_PER_CLEAR
+        );
+    }
+
+    #[test]
+    fn clear_after_valuable_clear_cap_awards_zero_rare_eligibility() {
+        let mut enemy = test_enemy_location();
+        enemy.clear_count = DEFAULT_VALUABLE_CLEAR_CAP as u64;
+        let mut player_run = test_player_run();
+
+        let outcome = apply_clear_enemy_state(&mut enemy, &mut player_run, 1_500).unwrap();
+
+        assert_eq!(enemy.clear_count, DEFAULT_VALUABLE_CLEAR_CAP as u64 + 1);
         assert_eq!(player_run.common_loot_count, 1);
         assert_eq!(outcome.rare_eligibility_points_awarded, 0);
         assert_eq!(player_run.rare_eligibility_points, 0);

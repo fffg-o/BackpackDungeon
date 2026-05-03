@@ -10,7 +10,7 @@ import {
 } from "../src/index.js";
 
 const BASE_INPUT: DailyMapInput = Object.freeze({
-  bossCount: 2,
+  bossCount: 1,
   dayId: "2026-04-25",
   enemyCount: 12,
   height: 60,
@@ -40,7 +40,7 @@ test("different seed produces a different map", () => {
   assert.notEqual(first.seedHash, second.seedHash);
 });
 
-test("POI counts are configurable and at least one boss is guaranteed", () => {
+test("POI counts are configurable and exactly one boss is generated", () => {
   const map = generateDailyMap({
     ...BASE_INPUT,
     bossCount: 0,
@@ -54,6 +54,25 @@ test("POI counts are configurable and at least one boss is guaranteed", () => {
   assert.equal(countKind(map.locations, LocationKind.Shop), 2);
   assert.equal(countKind(map.locations, LocationKind.Treasure), 5);
   assert.equal(map.locations.length, 11);
+});
+
+test("requested extra bosses are ignored", () => {
+  for (const bossCount of [0, 2, 99]) {
+    const map = generateDailyMap({ ...BASE_INPUT, bossCount });
+
+    assert.equal(countKind(map.locations, LocationKind.Boss), 1);
+  }
+});
+
+test("the single boss has a unique id and position", () => {
+  const map = generateDailyMap({ ...BASE_INPUT, bossCount: 2 });
+  const bosses = map.locations.filter((location) => location.kind === LocationKind.Boss);
+  const bossIds = new Set(bosses.map((location) => location.id));
+  const bossPositions = new Set(bosses.map((location) => positionKey(location)));
+
+  assert.equal(bosses.length, 1);
+  assert.equal(bossIds.size, 1);
+  assert.equal(bossPositions.size, 1);
 });
 
 test("all POIs are within map bounds", () => {

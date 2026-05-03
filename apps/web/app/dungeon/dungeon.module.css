@@ -249,8 +249,29 @@
   background: #2a2e32;
 }
 
+.poiLocked {
+  background: #261515;
+}
+
 .poiIcon {
   font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.poiLock {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #0a0c0e;
+  border: 1px solid #3a2020;
+  font-size: 7px;
   line-height: 1;
   pointer-events: none;
 }

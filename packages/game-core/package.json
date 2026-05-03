@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.test.json && node --test dist-tests/**/*.test.js"
+    "test": "tsc -p tsconfig.test.json && node --test \"dist-tests/**/*.test.js\" \"test/**/*.test.mjs\""
   },
   "dependencies": {
     "@backpack-dungeon/shared": "workspace:*"

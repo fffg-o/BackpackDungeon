@@ -230,50 +230,67 @@ validator_is_ready() {
   curl -s --connect-timeout 2 -o /dev/null -w "%{http_code}" http://127.0.0.1:8899/health 2>/dev/null | grep -q "200"
 }
 
-# Start validator if not already running
+# Kill existing validator if running, to ensure a fresh ledger with --reset
 if validator_is_ready; then
-  log_ok "Validator already running on port 8899"
-else
-  mkdir -p "$(dirname "$VALIDATOR_LOG")"
-
-  log_info "Starting validator (background, log: $VALIDATOR_LOG)..."
-
-  # Check if we have a keypair
-  if [ ! -f "$ANCHOR_KEYPAIR" ]; then
-    log_info "Creating default Solana keypair..."
-    solana-keygen new --no-bip39-passphrase -f -s -o "$ANCHOR_KEYPAIR" 2>/dev/null
+  log_info "Validator already running — stopping for --reset restart..."
+  # Try graceful shutdown via kill
+  if [ -f "$PROJECT_ROOT/.anchor/validator.pid" ]; then
+    kill "$(cat "$PROJECT_ROOT/.anchor/validator.pid")" 2>/dev/null || true
   fi
-
-  solana-test-validator \
-    --ledger "$VALIDATOR_LEDGER" \
-    --reset \
-    --quiet \
-    --bind-address 0.0.0.0 \
-    --rpc-port 8899 \
-    --faucet-port 9900 \
-    > "$VALIDATOR_LOG" 2>&1 &
-
-  VALIDATOR_PID=$!
-  echo "$VALIDATOR_PID" > "$PROJECT_ROOT/.anchor/validator.pid"
-
-  # Wait for validator to be ready
-  log_info "Waiting for validator to start..."
-  for i in $(seq 1 30); do
-    if validator_is_ready; then
-      log_ok "Validator is ready (PID: $VALIDATOR_PID)"
+  # Also try pkill as fallback
+  pkill -f "solana-test-validator.*$VALIDATOR_LEDGER" 2>/dev/null || true
+  sleep 2
+  # Wait until the port is free
+  for i in $(seq 1 15); do
+    if ! validator_is_ready; then
+      log_info "Old validator stopped."
       break
-    fi
-    if [ "$i" -eq 30 ]; then
-      log_error "Validator failed to start within 30 seconds. Check $VALIDATOR_LOG"
-      exit 1
     fi
     sleep 1
   done
-
-  # Airdrop SOL to deployer
-  sleep 2
-  solana airdrop 500 "$(solana address)" 2>/dev/null || log_warn "Airdrop failed (may already have SOL)"
+  # Clean up the old ledger so --reset starts completely fresh
+  rm -rf "$VALIDATOR_LEDGER" 2>/dev/null || true
 fi
+
+mkdir -p "$(dirname "$VALIDATOR_LOG")"
+
+log_info "Starting validator (background, log: $VALIDATOR_LOG)..."
+
+# Check if we have a keypair
+if [ ! -f "$ANCHOR_KEYPAIR" ]; then
+  log_info "Creating default Solana keypair..."
+  solana-keygen new --no-bip39-passphrase -f -s -o "$ANCHOR_KEYPAIR" 2>/dev/null
+fi
+
+solana-test-validator \
+  --ledger "$VALIDATOR_LEDGER" \
+  --reset \
+  --quiet \
+  --bind-address 0.0.0.0 \
+  --rpc-port 8899 \
+  --faucet-port 9900 \
+  > "$VALIDATOR_LOG" 2>&1 &
+
+VALIDATOR_PID=$!
+echo "$VALIDATOR_PID" > "$PROJECT_ROOT/.anchor/validator.pid"
+
+# Wait for validator to be ready
+log_info "Waiting for validator to start..."
+for i in $(seq 1 30); do
+  if validator_is_ready; then
+    log_ok "Validator is ready (PID: $VALIDATOR_PID)"
+    break
+  fi
+  if [ "$i" -eq 30 ]; then
+    log_error "Validator failed to start within 30 seconds. Check $VALIDATOR_LOG"
+    exit 1
+  fi
+  sleep 1
+done
+
+# Airdrop SOL to deployer
+sleep 2
+solana airdrop 500 "$(solana address)" 2>/dev/null || log_warn "Airdrop failed (may already have SOL)"
 
 # ── Step 4: Deploy Anchor program ─────────────────────────────────────────────
 log_step "Step 4: Deploying Anchor program"

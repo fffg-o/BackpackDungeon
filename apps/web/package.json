@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "pnpm --filter @backpack-dungeon/shared build && pnpm --filter @backpack-dungeon/game-core build && next build",
     "start": "next start",
     "lint": "next lint"
   },

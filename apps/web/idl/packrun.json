@@ -2194,103 +2194,113 @@
     },
     {
       "code": 6024,
+      "name": "EnemyClearOverflow",
+      "msg": "enemy clear state overflowed."
+    },
+    {
+      "code": 6025,
       "name": "InsufficientEnergy",
       "msg": "player does not have enough energy."
     },
     {
-      "code": 6025,
+      "code": 6026,
       "name": "DailyClearLimitExceeded",
       "msg": "player has exceeded the daily enemy clear limit."
     },
     {
-      "code": 6026,
+      "code": 6027,
       "name": "ArithmeticOverflow",
       "msg": "arithmetic overflow."
     },
     {
-      "code": 6027,
+      "code": 6028,
       "name": "InsufficientStock",
       "msg": "shop item slot has insufficient stock."
     },
     {
-      "code": 6028,
+      "code": 6029,
       "name": "PriceMismatch",
       "msg": "expected price does not match the computed price."
     },
     {
-      "code": 6029,
+      "code": 6030,
       "name": "PurchaseLimitExceeded",
       "msg": "player has exceeded the per-wallet daily purchase limit for this item."
     },
     {
-      "code": 6030,
+      "code": 6031,
       "name": "InvalidDamageScore",
       "msg": "damage_score must be greater than zero."
     },
     {
-      "code": 6031,
+      "code": 6032,
       "name": "DamageScoreExceeded",
       "msg": "damage_score exceeds the maximum allowed per submission."
     },
     {
-      "code": 6032,
+      "code": 6033,
       "name": "ShardIndexMismatch",
       "msg": "shard_index does not match the player's assigned shard."
     },
     {
-      "code": 6033,
+      "code": 6034,
       "name": "BossSubmissionLimitExceeded",
       "msg": "player has exceeded the boss submission limit for this daily dungeon."
     },
     {
-      "code": 6034,
+      "code": 6035,
       "name": "LocationIsNotBoss",
       "msg": "location is not a boss location."
     },
     {
-      "code": 6035,
+      "code": 6036,
       "name": "InvalidBossDamageShard",
       "msg": "boss damage shard account is invalid."
     },
     {
-      "code": 6036,
+      "code": 6037,
       "name": "InvalidBossContribution",
       "msg": "player boss contribution account is invalid."
     },
     {
-      "code": 6037,
+      "code": 6038,
       "name": "InvalidBossLocation",
       "msg": "boss location account is invalid."
     },
     {
-      "code": 6038,
+      "code": 6039,
       "name": "InsufficientBossDamage",
       "msg": "player has not dealt enough damage to claim the boss NFT."
     },
     {
-      "code": 6039,
+      "code": 6040,
       "name": "BossNftAlreadyClaimed",
       "msg": "player has already claimed the boss NFT for this daily dungeon."
     },
     {
-      "code": 6040,
+      "code": 6041,
       "name": "DungeonNotEnded",
       "msg": "daily dungeon has not ended yet."
     },
     {
-      "code": 6041,
+      "code": 6042,
       "name": "DailyRewardAlreadyClaimed",
       "msg": "player has already claimed the daily reward for this dungeon."
     },
     {
-      "code": 6042,
+      "code": 6043,
       "name": "DailyRewardTierNotMet",
       "msg": "player run does not satisfy any reward tier condition."
     },
     {
-      "code": 6043,
+      "code": 6044,
       "name": "PlayerRunNotFound",
       "msg": "player run not found for this day and player."
+    },
+    {
+      "code": 6045,
+      "name": "LocationIsNotTreasure",
+      "msg": "location is not a treasure."
     }
   ],
   "types": [

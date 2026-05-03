@@ -44,7 +44,7 @@ BackpackDungeon/
 │       └── src/lib.rs
 ├── tests/
 │   ├── packrun.test.mjs             # 测试入口（由 Anchor.toml 引用）
-│   ├── packrun.gameplay.test.mjs    # 游戏逻辑集成测试（66 项）
+│   ├── packrun.gameplay.test.mjs    # 游戏逻辑集成测试（68 项）
 │   └── packrun.anchor.test.mjs      # Anchor 本地网集成测试
 ├── Anchor.toml
 └── start.sh                         # 一键启动脚本
@@ -110,6 +110,8 @@ PACKRUN_DAY_ID=2026-04-26 PACKRUN_RANDOM_SEED=123456 ./start.sh
 ```
 
 `start.sh` 会用同一组配置初始化链上账户并启动 Web 前端，避免地图和 Merkle root 不一致。
+
+地图现在每天只生成 1 个 Boss；该规则会改变 `mapRoot`，本地已经用旧 dayId 初始化过的 localnet 需要 reset ledger，或换一个新的 `PACKRUN_DAY_ID`。
 
 ### 启动 Web 前端（单独）
 

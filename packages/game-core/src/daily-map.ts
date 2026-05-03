@@ -34,6 +34,10 @@ export interface DailyMapInput {
   readonly width: number;
   readonly height: number;
   readonly poiDensity: number;
+  /**
+   * Deprecated and currently ignored. Packrun supports exactly one Boss POI
+   * per day because boss shard accounts are day-scoped.
+   */
   readonly bossCount: number;
   readonly shopCount: number;
   readonly enemyCount: number;
@@ -110,7 +114,9 @@ export function generateDailyMap(input: DailyMapInput): DailyMap {
   const height = assertPositiveInteger(input.height, "height");
   assertDensity(input.poiDensity);
 
-  const bossCount = Math.max(1, assertNonNegativeInteger(input.bossCount, "bossCount"));
+  const requestedBossCount = assertNonNegativeInteger(input.bossCount, "bossCount");
+  const bossCount = 1;
+  void requestedBossCount;
   const shopCount = assertNonNegativeInteger(input.shopCount, "shopCount");
   const enemyCount = assertNonNegativeInteger(input.enemyCount, "enemyCount");
   const treasureCount = assertNonNegativeInteger(input.treasureCount, "treasureCount");

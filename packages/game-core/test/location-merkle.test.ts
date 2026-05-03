@@ -12,7 +12,7 @@ import {
 } from "../src/index.js";
 
 const BASE_INPUT: DailyMapInput = Object.freeze({
-  bossCount: 2,
+  bossCount: 1,
   dayId: "2026-04-25",
   enemyCount: 8,
   height: 40,

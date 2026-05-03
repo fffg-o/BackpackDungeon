@@ -41,7 +41,7 @@ import { simulateBattle } from "../apps/web/app/dungeon/battle-sim.ts";
 
 const RANDOM_SEED = 20_260_425;
 const BASE_INPUT = Object.freeze({
-  bossCount: 2,
+  bossCount: 1,
   dayId: "2026-04-25",
   enemyCount: 12,
   height: 20,
@@ -121,8 +121,28 @@ test("daily map produces correct POI counts", () => {
 
   assert.equal(enemies.length, BASE_INPUT.enemyCount);
   assert.equal(shops.length, BASE_INPUT.shopCount);
-  assert.equal(bosses.length, BASE_INPUT.bossCount);
+  assert.equal(bosses.length, 1);
   assert.equal(treasures.length, BASE_INPUT.treasureCount);
+});
+
+test("daily map ignores requested extra bosses", () => {
+  for (const bossCount of [0, 2, 99]) {
+    const map = generateDailyMap({ ...BASE_INPUT, bossCount });
+    const bosses = map.locations.filter((l) => l.kind === LocationKind.Boss);
+
+    assert.equal(bosses.length, 1);
+  }
+});
+
+test("daily map has one boss with a unique id and position", () => {
+  const map = generateDailyMap({ ...BASE_INPUT, bossCount: 2 });
+  const bosses = map.locations.filter((l) => l.kind === LocationKind.Boss);
+  const ids = new Set(bosses.map((l) => l.id));
+  const positions = new Set(bosses.map((l) => `${l.position.x},${l.position.y}`));
+
+  assert.equal(bosses.length, 1);
+  assert.equal(ids.size, 1);
+  assert.equal(positions.size, 1);
 });
 
 test("all POIs have unique positions", () => {
