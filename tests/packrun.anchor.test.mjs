@@ -53,6 +53,12 @@ const DAILY_DUNGEON_SEED = Buffer.from("dungeon");
 const LOCATION_SEED = Buffer.from("location");
 const ENEMY_LOCATION_SEED = Buffer.from("enemy");
 const PLAYER_RUN_SEED = Buffer.from("run");
+const SHOP_SEED = Buffer.from("shop");
+const SHOP_ITEM_SLOT_SEED = Buffer.from("shop_slot");
+const DAILY_REWARD_CLAIM_SEED = Buffer.from("daily_claim");
+const DEFAULT_STARTING_GOLD = 100;
+const DEFAULT_ENEMY_CLEAR_GOLD_REWARD = 10;
+const DEFAULT_TREASURE_GOLD_REWARD = 25;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -100,6 +106,43 @@ function playerRunPda(dayId, player) {
     [PLAYER_RUN_SEED, Buffer.from(dayId), player.toBuffer()],
     PROGRAM_ID
   );
+}
+
+/** Derive a PDA for a shop detail account. */
+function shopPda(dayId, poiIdHash) {
+  return PublicKey.findProgramAddressSync(
+    [SHOP_SEED, Buffer.from(dayId), Buffer.from(poiIdHash)],
+    PROGRAM_ID
+  );
+}
+
+/** Derive a PDA for a shop item slot account. */
+function shopItemSlotPda(dayId, poiIdHash, slotIndex) {
+  const slotIndexBytes = Buffer.alloc(2);
+  slotIndexBytes.writeUInt16LE(slotIndex);
+  return PublicKey.findProgramAddressSync(
+    [SHOP_ITEM_SLOT_SEED, Buffer.from(dayId), Buffer.from(poiIdHash), slotIndexBytes],
+    PROGRAM_ID
+  );
+}
+
+/** Derive a PDA for a daily reward claim account. */
+function dailyRewardClaimPda(dayId, player, poiIdHash) {
+  return PublicKey.findProgramAddressSync(
+    [DAILY_REWARD_CLAIM_SEED, Buffer.from(dayId), player.toBuffer(), Buffer.from(poiIdHash)],
+    PROGRAM_ID
+  );
+}
+
+function currentShopPrice(slotAccount) {
+  const openedAt = BigInt(slotAccount.openedAt.toString());
+  const interval = BigInt(slotAccount.restockIntervalSeconds.toString());
+  const now = BigInt(Math.floor(Date.now() / 1_000));
+  const restockEpoch = interval <= 0n || now < openedAt ? 0n : (now - openedAt) / interval;
+  const basePrice = BigInt(slotAccount.basePrice.toString());
+  const soldCount = BigInt(slotAccount.soldCount.toString());
+  const multiplierBps = 10_000n + restockEpoch * 1_200n + soldCount * 400n;
+  return (basePrice * multiplierBps + 9_999n) / 10_000n;
 }
 
 /**
@@ -158,7 +201,7 @@ function toAnchorLocationSpec(spec, dayId) {
         maxStock: slot.stock,
         restockIntervalSeconds: new BN(300),
         maxRestockCount: 0,
-        perWalletDailyLimit: 5,
+        perWalletDailyLimit: Math.min(5, Math.max(1, slot.stock)),
         rewardTier: { [slot.rewardTier.toLowerCase()]: {} },
       })),
     };
@@ -218,6 +261,12 @@ const mapRoot = Array.from(hexToBytes32(merkleTree.root));
 // Find an enemy location for testing
 const enemyLoc = dailyMap.locations.find(
   (l) => l.kind === LocationKind.Enemy && l.enemy
+);
+const shopLoc = dailyMap.locations.find(
+  (l) => l.kind === LocationKind.Shop && l.shop?.itemSlots.length
+);
+const treasureLoc = dailyMap.locations.find(
+  (l) => l.kind === LocationKind.Treasure
 );
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -281,6 +330,7 @@ test("anchor: enter dungeon", async () => {
   assert.equal(run.dayId, DAY_ID);
   assert.equal(run.player.equals(wallet.publicKey), true);
   assert.equal(run.energy, 100);  // DEFAULT_PLAYER_RUN_ENERGY
+  assert.equal(run.goldBalance.toString(), String(DEFAULT_STARTING_GOLD));
   assert.equal(run.active, true);
   assert.equal(run.clearedLocations, 0);
 });
@@ -402,6 +452,9 @@ test("anchor: clear enemy", async () => {
     enemy.nextAvailableAt.toNumber() > beforeClearUnix,
     `Expected next_available_at > ${beforeClearUnix}, got ${enemy.nextAvailableAt}`
   );
+  const expectedGoldAfterClear =
+    DEFAULT_STARTING_GOLD + DEFAULT_ENEMY_CLEAR_GOLD_REWARD + enemy.difficultyLevel;
+  assert.equal(run.goldBalance.toString(), String(expectedGoldAfterClear));
 
   // 3. Immediate second clear is blocked by EnemyLocation cooldown
   await assert.rejects(
@@ -433,4 +486,149 @@ test("anchor: clear enemy", async () => {
   const dungeon = await program.account.dailyDungeon.fetch(dungeonPda);
   assert.equal(dungeon.locationCount, 1);
   assert.equal(dungeon.enemyCount, 1);
+});
+
+test("anchor: buy item spends on-chain gold", async () => {
+  assert.ok(shopLoc, "No shop location found in generated map");
+
+  const [dungeonPda] = dailyDungeonPda(DAY_ID);
+  const [runPda] = playerRunPda(DAY_ID, wallet.publicKey);
+
+  const poiIdHash = Array.from(sha256Bytes32(shopLoc.id));
+  const [locationPdaKey] = locationPda(DAY_ID, poiIdHash);
+  const [shopPdaKey] = shopPda(DAY_ID, poiIdHash);
+  const [slotPdaKey] = shopItemSlotPda(DAY_ID, poiIdHash, 0);
+
+  const proof = getLocationProof(dailyMap.locations, shopLoc.id);
+  const anchorProof = proof.map(toAnchorProofStep);
+  const anchorSpec = toAnchorLocationSpec(shopLoc, DAY_ID);
+
+  await program.methods
+    .initLocationFromMerkle(anchorSpec, anchorProof)
+    .accounts({
+      authority: wallet.publicKey,
+      dailyDungeon: dungeonPda,
+      locationAccount: locationPdaKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  await program.methods
+    .initShopDetail(DAY_ID, shopLoc.id, poiIdHash, anchorSpec)
+    .accounts({
+      authority: wallet.publicKey,
+      dailyDungeon: dungeonPda,
+      locationAccount: locationPdaKey,
+      shopAccount: shopPdaKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  const slotInput = {
+    ...anchorSpec.shop.itemSlots[0],
+    price: new BN(30),
+  };
+
+  await program.methods
+    .initShopItemSlot(DAY_ID, shopLoc.id, poiIdHash, 0, slotInput)
+    .accounts({
+      dailyDungeon: dungeonPda,
+      locationAccount: locationPdaKey,
+      shopAccount: shopPdaKey,
+      shopItemSlot: slotPdaKey,
+      payer: wallet.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  const runBefore = await program.account.playerRun.fetch(runPda);
+  const slotBefore = await program.account.shopItemSlotAccount.fetch(slotPdaKey);
+  const expectedPrice = currentShopPrice(slotBefore);
+
+  await program.methods
+    .buyItem(0, new BN(expectedPrice.toString()))
+    .accounts({
+      player: wallet.publicKey,
+      dailyDungeon: dungeonPda,
+      playerRun: runPda,
+      locationAccount: locationPdaKey,
+      shopAccount: shopPdaKey,
+      shopItemSlot: slotPdaKey,
+    })
+    .rpc();
+
+  const runAfter = await program.account.playerRun.fetch(runPda);
+  const slotAfter = await program.account.shopItemSlotAccount.fetch(slotPdaKey);
+  assert.equal(
+    runAfter.goldBalance.toString(),
+    (BigInt(runBefore.goldBalance.toString()) - expectedPrice).toString(),
+  );
+  assert.equal(runAfter.itemsPurchased, runBefore.itemsPurchased + 1);
+  assert.equal(slotAfter.soldCount.toString(), "1");
+});
+
+test("anchor: claim daily reward adds gold once", async () => {
+  assert.ok(treasureLoc, "No treasure location found in generated map");
+
+  const [dungeonPda] = dailyDungeonPda(DAY_ID);
+  const [runPda] = playerRunPda(DAY_ID, wallet.publicKey);
+
+  const poiIdHash = Array.from(sha256Bytes32(treasureLoc.id));
+  const [locationPdaKey] = locationPda(DAY_ID, poiIdHash);
+  const [claimPdaKey] = dailyRewardClaimPda(DAY_ID, wallet.publicKey, poiIdHash);
+
+  const proof = getLocationProof(dailyMap.locations, treasureLoc.id);
+  const anchorProof = proof.map(toAnchorProofStep);
+  const anchorSpec = toAnchorLocationSpec(treasureLoc, DAY_ID);
+
+  await program.methods
+    .initLocationFromMerkle(anchorSpec, anchorProof)
+    .accounts({
+      authority: wallet.publicKey,
+      dailyDungeon: dungeonPda,
+      locationAccount: locationPdaKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  const runBefore = await program.account.playerRun.fetch(runPda);
+
+  await program.methods
+    .claimDailyReward()
+    .accounts({
+      player: wallet.publicKey,
+      dailyDungeon: dungeonPda,
+      playerRun: runPda,
+      locationAccount: locationPdaKey,
+      dailyRewardClaim: claimPdaKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  const runAfter = await program.account.playerRun.fetch(runPda);
+  assert.equal(
+    runAfter.goldBalance.toString(),
+    (BigInt(runBefore.goldBalance.toString()) + BigInt(DEFAULT_TREASURE_GOLD_REWARD)).toString(),
+  );
+
+  await assert.rejects(
+    () => program.methods
+      .claimDailyReward()
+      .accounts({
+        player: wallet.publicKey,
+        dailyDungeon: dungeonPda,
+        playerRun: runPda,
+        locationAccount: locationPdaKey,
+        dailyRewardClaim: claimPdaKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc(),
+    (error) => {
+      assert.match(anchorErrorText(error), /DailyRewardAlreadyClaimed|already claimed/i);
+      return true;
+    }
+  );
+
+  const runAfterRejectedClaim = await program.account.playerRun.fetch(runPda);
+  assert.equal(runAfterRejectedClaim.goldBalance.toString(), runAfter.goldBalance.toString());
 });

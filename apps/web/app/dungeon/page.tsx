@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WalletButton } from "./wallet-button";
 import { BattleArena } from "./components/BattleArena";
 import { BattleOverlay, type BattleOverlayPhase } from "./components/battle/BattleOverlay";
+import { BackpackManagerModal } from "./components/backpack/BackpackManagerModal";
 import { StatPill } from "./components/StatPill";
 import { useBackpackInventory } from "./hooks/useBackpackInventory";
 import {
@@ -16,7 +17,6 @@ import {
   createDailyMapInput,
   generateDailyMap,
   getBackpackItemDefinition,
-  getItemSize,
   getLocationProof,
   parseDailyMapRandomSeed,
   previewBackpackItemFromShopSlot,
@@ -134,6 +134,8 @@ const MAP_INPUT: DailyMapInput = createDailyMapInput({
 });
 
 const ENEMY_CLEAR_ENERGY_COST = 5;
+const DEFAULT_ENEMY_CLEAR_GOLD_REWARD = 10;
+const DEFAULT_TREASURE_GOLD_REWARD = 25;
 const EXPLORER_CLUSTER = "devnet";
 const BATTLE_REPLAY_STEP_MS = 450;
 const MINIMUM_BOSS_NFT_DAMAGE = 1;
@@ -215,6 +217,14 @@ function formatDurationSeconds(totalSeconds: number | undefined): string {
   return `${seconds}s`;
 }
 
+function formatGold(value: number): string {
+  return Math.max(0, value).toLocaleString();
+}
+
+function computeEnemyClearGoldReward(baseLevel: number, clearCountAfter: number): number {
+  return DEFAULT_ENEMY_CLEAR_GOLD_REWARD + baseLevel + clearCountAfter;
+}
+
 function shopPurchaseSourceRef(
   dayId: string,
   poiId: string,
@@ -251,25 +261,6 @@ function itemIcon(definition: BackpackItemDefinitionV1): string {
 function itemEffectSummary(definition: BackpackItemDefinitionV1): string {
   if (definition.effects.length === 0) return definition.description;
   return definition.effects.map((effect) => effect.description).join(" ");
-}
-
-function adjacencyHints(definition: BackpackItemDefinitionV1): readonly string[] {
-  if (definition.kind === "gem" && definition.tags.includes("ruby")) {
-    return ["Next to a weapon: +1 ATK."];
-  }
-  if (definition.kind === "charm") {
-    return ["Next to a gem: +100 crit bps."];
-  }
-  if (definition.kind === "ward") {
-    return ["Next to armor: +1 DEF."];
-  }
-  if (definition.kind === "weapon") {
-    return ["Ruby touching this weapon gains +1 ATK."];
-  }
-  if (definition.kind === "armor") {
-    return ["Ward touching this armor gains +1 DEF."];
-  }
-  return ["No adjacency bonus."];
 }
 
 function shopRestockInfo(stockInfo: NonNullable<PoiOnChainState["stock"]>[number] | undefined): string {
@@ -468,6 +459,7 @@ export default function DailyDungeonPage() {
   const [dailyRewardPhase, setDailyRewardPhase] = useState<TxPhase>({ phase: "idle" });
   const [bossNftClaimPhase, setBossNftClaimPhase] = useState<TxPhase>({ phase: "idle" });
   const [battleOverlayTarget, setBattleOverlayTarget] = useState<"enemy" | "boss" | null>(null);
+  const [backpackOpen, setBackpackOpen] = useState(false);
   const [toast, setToast] = useState<DungeonToast | null>(null);
 
   const [, setTick] = useState(0);
@@ -532,6 +524,7 @@ export default function DailyDungeonPage() {
     moveItem,
     rotateItem,
     autoPack,
+    resetBackpack,
     hasItemSource,
   } = useBackpackInventory(map.dayId, publicKeyString);
 
@@ -965,6 +958,10 @@ export default function DailyDungeonPage() {
     setChainError(null);
     try {
       const { player, signingProgram } = requireWallet();
+      const goldReward = computeEnemyClearGoldReward(
+        selectedPoi.spec.enemy.level,
+        (selectedPoiState?.clearCount ?? 0) + 1,
+      );
       const signature = await clearEnemy(
         signingProgram,
         map.dayId,
@@ -973,9 +970,21 @@ export default function DailyDungeonPage() {
         battle.result,
       );
       setTxSignature(signature);
-      await Promise.all([refreshDailyDungeon(), refreshPlayerRun(), refreshSelectedPoiState()]);
+      const [, nextPlayerRun] = await Promise.all([
+        refreshDailyDungeon(),
+        refreshPlayerRun(),
+        refreshSelectedPoiState(),
+      ]);
       clearBattleReplayTimer();
       setBattlePhase({ phase: "success", signature, result: battle.result });
+      pushToast({
+        title: `+${goldReward} Gold / +${goldReward} 金币`,
+        message: nextPlayerRun?.hasGoldBalance
+          ? `Gold / 金币 ${formatGold(nextPlayerRun.goldBalance)}`
+          : "Gold balance will appear after re-entering the dungeon.",
+        signature,
+        variant: "success",
+      });
     } catch (error) {
       const message = formatError(error, "Failed to submit enemy clear.");
       setBattlePhase({
@@ -994,6 +1003,7 @@ export default function DailyDungeonPage() {
     refreshPlayerRun,
     refreshSelectedPoiState,
     requireWallet,
+    pushToast,
     selectedPoi,
     selectedPoiState,
   ]);
@@ -1083,7 +1093,20 @@ export default function DailyDungeonPage() {
       const slot = selectedPoi.spec.shop.itemSlots[slotIndex];
       if (!slot) return;
       const stockInfo = selectedPoi.onChain.stock[slotIndex];
-      if (!stockInfo?.initialized || !stockInfo.expectedPrice || (stockInfo.available ?? 0) <= 0) {
+      const availableStock = stockInfo?.availableStock ?? stockInfo?.available ?? 0;
+      if (!stockInfo?.initialized || !stockInfo.expectedPrice || availableStock <= 0) {
+        return;
+      }
+      if (!playerRun.hasGoldBalance) {
+        setShopActionPhase({
+          phase: "error",
+          message: "Re-enter dungeon or reset localnet after gold migration.",
+        });
+        return;
+      }
+      const price = stockInfo.currentPrice ?? stockInfo.price ?? slot.price;
+      if (playerRun.goldBalance < price) {
+        setShopActionPhase({ phase: "error", message: "Not enough gold / 金币不足." });
         return;
       }
 
@@ -1120,17 +1143,17 @@ export default function DailyDungeonPage() {
         });
         const placement = addAndAutoPlaceItem(purchasedItem);
         const definition = getBackpackItemDefinition(purchasedItem.definitionId);
+        setShopActionPhase({ phase: "bought", slotIndex, signature });
+        setTxSignature(signature);
+        await refreshAfterTx();
         pushToast({
-          title: `Bought ${definition.name}`,
+          title: `Bought item / 购买成功: ${definition.name}`,
           message: placement.placed
-            ? "Added to backpack"
+            ? "Added to backpack / 已加入背包"
             : "Added to inventory; no room in backpack.",
           signature,
           variant: placement.placed ? "success" : "warning",
         });
-        setShopActionPhase({ phase: "bought", slotIndex, signature });
-        setTxSignature(signature);
-        await refreshAfterTx();
       } catch (error) {
         const message = formatError(error, "Purchase failed.");
         setShopActionPhase({ phase: "error", message });
@@ -1366,6 +1389,8 @@ export default function DailyDungeonPage() {
       const poiIdHash = sha256Bytes32(selectedPoi.spec.id);
       const sourceRef = bytesToHex(poiIdHash);
       const signature = await claimDailyReward(signingProgram, map.dayId, player, poiIdHash);
+      let localItemMessage = "Reward claimed.";
+      let toastVariant: DungeonToast["variant"] = "success";
       if (!hasItemSource("treasure", sourceRef)) {
         const treasureItem = createBackpackItemFromTreasure(
           {
@@ -1382,18 +1407,20 @@ export default function DailyDungeonPage() {
           },
         );
         const placement = addAndAutoPlaceItem(treasureItem);
-        pushToast({
-          title: "Claimed NFT + Backpack Item",
-          message: placement.placed
-            ? "Added to backpack"
-            : "Added to inventory; no room in backpack.",
-          signature,
-          variant: placement.placed ? "success" : "warning",
-        });
+        localItemMessage = placement.placed
+          ? "Added to backpack / 已加入背包"
+          : "Added to inventory; no room in backpack.";
+        toastVariant = placement.placed ? "success" : "warning";
       }
       setDailyRewardPhase({ phase: "success", signature });
       setTxSignature(signature);
       await refreshAfterTx();
+      pushToast({
+        title: `+${DEFAULT_TREASURE_GOLD_REWARD} Gold / +${DEFAULT_TREASURE_GOLD_REWARD} 金币`,
+        message: localItemMessage,
+        signature,
+        variant: toastVariant,
+      });
     } catch (error) {
       const message = formatError(error, "Failed to claim daily reward.");
       setDailyRewardPhase({
@@ -1511,6 +1538,9 @@ export default function DailyDungeonPage() {
             {playerRun ? (
               <>
                 <StatPill label="EN" value={playerRun.energy} title="Energy" />
+                <span className={`${styles.stat} ${styles.goldPill}`} title="Gold / 金币">
+                  🪙 Gold / 金币 {formatGold(playerRun.goldBalance)}
+                </span>
                 <StatPill label="CL" value={playerRun.clearedLocations} title="Cleared locations" />
                 <StatPill label="BD" value={playerRun.bossDamage} title="Boss damage" />
                 <StatPill label="IT" value={playerRun.itemsPurchased} title="Items purchased" />
@@ -1525,6 +1555,15 @@ export default function DailyDungeonPage() {
             <StatPill label="POI" value={map.locations.length} title="Total POIs" />
             <StatPill label="" value={`${map.width}x${map.height}`} title="Map size" />
           </div>
+          <button
+            type="button"
+            className={styles.backpackButton}
+            onClick={() => setBackpackOpen(true)}
+            aria-label={`Open Backpack / 背包 with ${inventory.length} items`}
+          >
+            Backpack / 背包 ({inventory.length})
+            {playerRun ? ` · 🪙 ${formatGold(playerRun.goldBalance)}` : ""}
+          </button>
           {wallet.connected && !playerRun && (
             <button
               className={styles.btnPrimary}
@@ -1694,6 +1733,18 @@ export default function DailyDungeonPage() {
           )}
         </aside>
       </div>
+
+      <BackpackManagerModal
+        open={backpackOpen}
+        onClose={() => setBackpackOpen(false)}
+        layout={layout}
+        inventory={inventory}
+        backpackSnapshot={backpackSnapshot}
+        onMoveItem={moveItem}
+        onRotateItem={rotateItem}
+        onAutoPack={autoPack}
+        onResetBackpack={resetBackpack}
+      />
 
       {selectedEnemy && (
         <BattleOverlay
@@ -1954,6 +2005,7 @@ function PoiDetailPanel({
           onBuyItem={onBuyItem}
           walletConnected={walletConnected}
           hasPlayerRun={hasPlayerRun}
+          playerRun={playerRun}
           txPending={txPending}
         />
       )}
@@ -2122,6 +2174,7 @@ function ShopContent({
   onBuyItem,
   walletConnected,
   hasPlayerRun,
+  playerRun,
   txPending,
 }: {
   readonly shop: NonNullable<DailyLocationSpec["shop"]>;
@@ -2131,8 +2184,12 @@ function ShopContent({
   readonly onBuyItem: (slotIndex: number) => void;
   readonly walletConnected: boolean;
   readonly hasPlayerRun: boolean;
+  readonly playerRun: PlayerRunState | null;
   readonly txPending: TxPending;
 }) {
+  const playerGoldKnown = playerRun?.hasGoldBalance ?? false;
+  const playerGold = playerRun?.goldBalance ?? 0;
+
   return (
     <div className={styles.detailCard}>
       <h3 className={styles.sectionTitle}>🛒 Shop</h3>
@@ -2144,6 +2201,15 @@ function ShopContent({
         <span className={styles.metaLabel}>Slots</span>
         <span className={styles.metaValue}>{onChain?.slotCount ?? shop.itemSlots.length}</span>
       </div>
+      <div className={styles.shopGoldBanner}>
+        <span>Current Gold / 当前金币</span>
+        <strong>🪙 {formatGold(playerGold)}</strong>
+      </div>
+      {hasPlayerRun && !playerGoldKnown && (
+        <p className={styles.goldWarning}>
+          Re-enter dungeon or reset localnet after gold migration.
+        </p>
+      )}
       <p className={styles.mvpNotice}>
         Backpack items are stored locally in this MVP; the purchase itself is on-chain.
       </p>
@@ -2158,8 +2224,6 @@ function ShopContent({
         };
         const preview = previewBackpackItemFromShopSlot(previewSlot);
         const definition = preview.definition;
-        const size = getItemSize(definition, false);
-        const hints = adjacencyHints(definition);
         const isInitializing =
           txPending === shopTxKey("initShopSlot", index) ||
           (shopActionPhase.phase === "initializingSlot" && shopActionPhase.slotIndex === index);
@@ -2170,8 +2234,10 @@ function ShopContent({
         const isSlotInitialized = shopActionPhase.phase === "slotInitialized" && shopActionPhase.slotIndex === index;
         const availableStock = stockInfo?.availableStock ?? stockInfo?.available ?? 0;
         const inStock = availableStock > 0;
-        const disabled = Boolean(stockInfo?.initialized && !inStock);
         const price = stockInfo?.currentPrice ?? stockInfo?.price ?? slot.price;
+        const canAfford = playerGoldKnown && playerGold >= price;
+        const afterPurchase = playerGold - price;
+        const disabled = Boolean(stockInfo?.initialized && (!inStock || !canAfford));
 
         return (
           <div
@@ -2186,7 +2252,7 @@ function ShopContent({
               <div className={styles.shopItemTitle}>
                 <span className={styles.shopSlotName}>{definition.name}</span>
                 <span className={styles.shopItemSubline}>
-                  {definition.kind} · {size.width}x{size.height}
+                  Price: {formatGold(price)}
                 </span>
               </div>
               <span
@@ -2197,11 +2263,6 @@ function ShopContent({
               </span>
             </div>
             <p className={styles.shopEffectSummary}>{itemEffectSummary(definition)}</p>
-            <div className={styles.adjacencyHint}>
-              {hints.map((hint) => (
-                <span key={hint}>{hint}</span>
-              ))}
-            </div>
             {!stockInfo?.initialized ? (
               <>
                 <p className={styles.hint}>Slot #{index} is not initialized on-chain.</p>
@@ -2216,7 +2277,12 @@ function ShopContent({
             ) : (
               <>
                 <div className={styles.shopStatsGrid}>
-                  <ShopCardStat label="Price" value={`${price} pts`} />
+                  <ShopCardStat label="Current Gold" value={playerGoldKnown ? formatGold(playerGold) : "0"} />
+                  <ShopCardStat label="Price" value={formatGold(price)} />
+                  <ShopCardStat
+                    label="After purchase"
+                    value={playerGoldKnown ? formatGold(afterPurchase) : "Unavailable"}
+                  />
                   <ShopCardStat label="Stock" value={shopStockLabel(stockInfo, slot.stock)} />
                   <ShopCardStat label="Sold" value={stockInfo.soldCount ?? 0} />
                   <ShopCardStat label="Restock" value={shopRestockInfo(stockInfo)} />
@@ -2233,9 +2299,23 @@ function ShopContent({
                     <span>Buying...</span>
                   </div>
                 ) : walletConnected && hasPlayerRun && inStock ? (
-                  <button className={styles.btnClear} onClick={() => onBuyItem(index)} disabled={txPending !== null} style={{ marginTop: 6 }}>
-                    Buy
-                  </button>
+                  <>
+                    <button
+                      className={styles.btnClear}
+                      onClick={() => onBuyItem(index)}
+                      disabled={txPending !== null || !canAfford}
+                      style={{ marginTop: 6 }}
+                    >
+                      Buy
+                    </button>
+                    {!playerGoldKnown ? (
+                      <p className={styles.goldWarning}>
+                        Re-enter dungeon or reset localnet after gold migration.
+                      </p>
+                    ) : !canAfford ? (
+                      <p className={styles.goldWarning}>Not enough gold / 金币不足</p>
+                    ) : null}
+                  </>
                 ) : walletConnected && !hasPlayerRun ? (
                   <p className={styles.hint}>Enter dungeon before buying items.</p>
                 ) : !inStock ? (
@@ -2509,7 +2589,6 @@ function TreasureContent({
   const previewDefinition = previewItem
     ? getBackpackItemDefinition(previewItem.definitionId)
     : getBackpackItemDefinition("ruby-common");
-  const previewSize = getItemSize(previewDefinition, false);
   const canRestore = Boolean(onChain?.dailyRewardClaimed && !hasBackpackItem);
 
   return (
@@ -2567,15 +2646,9 @@ function TreasureContent({
           </span>
           <div className={styles.rewardPreviewBody}>
             <strong>{previewDefinition.name}</strong>
-            <span>
-              {previewDefinition.tier} · {previewDefinition.kind} · {previewSize.width}x{previewSize.height}
-            </span>
+            <span>{previewDefinition.tier}</span>
             <p>{itemEffectSummary(previewDefinition)}</p>
           </div>
-        </div>
-        <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>SourceRef</span>
-          <span className={styles.metaValue}>{sourceRef}</span>
         </div>
         <div className={styles.detailMeta}>
           <span className={styles.metaLabel}>Added Locally</span>

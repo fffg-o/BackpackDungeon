@@ -113,6 +113,8 @@ PACKRUN_DAY_ID=2026-04-26 PACKRUN_RANDOM_SEED=123456 ./start.sh
 
 地图现在每天只生成 1 个 Boss；该规则会改变 `mapRoot`，本地已经用旧 dayId 初始化过的 localnet 需要 reset ledger，或换一个新的 `PACKRUN_DAY_ID`。
 
+PlayerRun 现在包含链上金币余额 `gold_balance`，账户空间比旧版本增加 8 bytes。升级后如果本地已有旧 `PlayerRun` 账户，前端会把金币显示为 0 并提示迁移；本地开发请 reset localnet ledger，或换一个新的 `PACKRUN_DAY_ID` / `NEXT_PUBLIC_PACKRUN_DAY_ID` 重新进入地牢。
+
 ### 启动 Web 前端（单独）
 
 ```bash

@@ -68,6 +68,14 @@
   font-family: monospace;
 }
 
+.goldPill {
+  color: #1b1202;
+  background: linear-gradient(135deg, #ffd76a, #f0b84f);
+  border: 1px solid rgba(255, 226, 132, 0.82);
+  box-shadow: 0 0 18px rgba(240, 184, 79, 0.22);
+  font-weight: 900;
+}
+
 /* ── Wallet ───────────────────────────────────────────────────────────────── */
 
 .walletInfo {
@@ -90,6 +98,24 @@
   border-radius: 8px;
   font-size: 13px;
   font-weight: 600;
+}
+
+.backpackButton {
+  min-height: 34px;
+  padding: 8px 14px;
+  color: #07100d;
+  background: #7ee0a1;
+  border: 1px solid rgba(126, 224, 161, 0.86);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 10px 28px rgba(126, 224, 161, 0.16);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.backpackButton:hover {
+  filter: brightness(1.08);
 }
 
 .btnPrimary {
@@ -526,6 +552,42 @@
 .shopSlotDisabled {
   opacity: 0.62;
   filter: grayscale(0.25);
+}
+
+.shopGoldBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  color: #1b1202;
+  background: linear-gradient(135deg, #ffd76a, #f0b84f);
+  border: 1px solid rgba(255, 226, 132, 0.8);
+  border-radius: 8px;
+  box-shadow: 0 0 24px rgba(240, 184, 79, 0.18);
+}
+
+.shopGoldBanner span {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.shopGoldBanner strong {
+  font-size: 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.goldWarning {
+  margin: 8px 0 0;
+  color: #f8d79a;
+  background: #221707;
+  border: 1px solid #7c5922;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .shopCardHeader {

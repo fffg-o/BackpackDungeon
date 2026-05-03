@@ -124,6 +124,8 @@ export interface PlayerRunAccount {
   readonly itemsPurchased: number;
   readonly enteredAt: IntegerAccountValue;
   readonly active: boolean;
+  readonly goldBalance?: IntegerAccountValue;
+  readonly gold_balance?: IntegerAccountValue;
 }
 
 export interface DailyRewardClaimAccount {

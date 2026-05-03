@@ -206,11 +206,16 @@ export function useBackpackInventory(
   }, [commitSave]);
 
   const resetBackpack = useCallback(() => {
-    if (!playerPubkey) return;
-    const next = touchSave(createStarterSave(dayId, playerPubkey));
-    persistBackpackSave(next);
-    setSave(next);
-  }, [dayId, playerPubkey]);
+    commitSave((current) => ({
+      ...current,
+      layout: {
+        height: current.layout.height,
+        placedItems: [],
+        version: 1,
+        width: current.layout.width,
+      },
+    }));
+  }, [commitSave]);
 
   const hasItemSource = useCallback(
     (sourceKind: BackpackItemSourceKind, sourceRef: string) =>

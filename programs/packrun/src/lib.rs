@@ -29,6 +29,9 @@ pub const SHOP_KEEPER_MAX_LEN: usize = 32;
 pub const ITEM_ID_MAX_LEN: usize = 64;
 pub const DEFAULT_PLAYER_RUN_ENERGY: u16 = 100;
 pub const DEFAULT_ENEMY_CLEAR_ENERGY_COST: u16 = 5;
+pub const DEFAULT_STARTING_GOLD: u64 = 100;
+pub const DEFAULT_ENEMY_CLEAR_GOLD_REWARD: u64 = 10;
+pub const DEFAULT_TREASURE_GOLD_REWARD: u64 = 25;
 pub const DEFAULT_ENEMY_BASE_COOLDOWN_SECONDS: i64 = 60;
 pub const DEFAULT_DAILY_ENEMY_CLEAR_LIMIT: u32 = 100;
 pub const DEFAULT_VALUABLE_CLEAR_CAP: u16 = 5;
@@ -131,6 +134,7 @@ pub mod packrun {
         player_run.entered_at = now;
         player_run.active = true;
         player_run.bump = ctx.bumps.player_run;
+        player_run.gold_balance = DEFAULT_STARTING_GOLD;
 
         Ok(())
     }
@@ -456,17 +460,15 @@ pub mod packrun {
             player: ctx.accounts.player.key(),
             poi_id: ctx.accounts.location_account.poi_id.clone(),
             proof_uri_hash,
+            gold_reward: outcome.gold_reward,
+            player_gold_balance: ctx.accounts.player_run.gold_balance,
             rare_eligibility_points_awarded: outcome.rare_eligibility_points_awarded,
         });
 
         Ok(())
     }
 
-    pub fn buy_item(
-        ctx: Context<BuyItem>,
-        slot_index: u16,
-        expected_price: u64,
-    ) -> Result<()> {
+    pub fn buy_item(ctx: Context<BuyItem>, slot_index: u16, expected_price: u64) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         validate_buy_item(
             &ctx.accounts.daily_dungeon,
@@ -482,6 +484,7 @@ pub mod packrun {
         apply_buy_item_state(
             &mut ctx.accounts.shop_item_slot,
             &mut ctx.accounts.player_run,
+            expected_price,
             now,
         )?;
 
@@ -495,8 +498,10 @@ pub mod packrun {
             poi_id: ctx.accounts.location_account.poi_id.clone(),
             item_id: ctx.accounts.shop_item_slot.item_id.clone(),
             price: expected_price,
+            price_paid: expected_price,
             sold_count: ctx.accounts.shop_item_slot.sold_count,
             player_item_count: ctx.accounts.player_run.items_purchased,
+            player_gold_balance: ctx.accounts.player_run.gold_balance,
         });
 
         Ok(())
@@ -591,13 +596,12 @@ pub mod packrun {
             ctx.accounts.daily_dungeon.key(),
         )?;
 
-        let reward_tier = compute_daily_reward_tier(
-            &ctx.accounts.daily_dungeon,
-            &ctx.accounts.player_run,
-        )?;
+        let reward_tier =
+            compute_daily_reward_tier(&ctx.accounts.daily_dungeon, &ctx.accounts.player_run)?;
 
         apply_claim_daily_reward(
             &mut ctx.accounts.daily_reward_claim,
+            &mut ctx.accounts.player_run,
             &ctx.accounts.daily_dungeon,
             reward_tier,
             ctx.accounts.player.key(),
@@ -611,6 +615,8 @@ pub mod packrun {
             cleared_locations: ctx.accounts.player_run.cleared_locations,
             boss_damage: ctx.accounts.player_run.boss_damage,
             claimed_at: now,
+            gold_reward: DEFAULT_TREASURE_GOLD_REWARD,
+            player_gold_balance: ctx.accounts.player_run.gold_balance,
         });
 
         Ok(())
@@ -1071,6 +1077,7 @@ pub struct ClaimDailyReward<'info> {
     )]
     pub daily_dungeon: Account<'info, DailyDungeon>,
     #[account(
+        mut,
         seeds = [PLAYER_RUN_SEED, daily_dungeon.day_id.as_bytes(), player.key().as_ref()],
         bump = player_run.bump,
         constraint = player_run.player == player.key() @ PackrunError::InvalidPlayerRun,
@@ -1220,6 +1227,8 @@ pub struct EnemyCleared {
     pub player: Pubkey,
     pub poi_id: String,
     pub proof_uri_hash: Option<[u8; 32]>,
+    pub gold_reward: u64,
+    pub player_gold_balance: u64,
     pub rare_eligibility_points_awarded: u32,
 }
 
@@ -1234,8 +1243,10 @@ pub struct ItemPurchased {
     pub poi_id: String,
     pub item_id: String,
     pub price: u64,
+    pub price_paid: u64,
     pub sold_count: u64,
     pub player_item_count: u32,
+    pub player_gold_balance: u64,
 }
 
 #[event]
@@ -1271,6 +1282,8 @@ pub struct DailyRewardClaimed {
     pub cleared_locations: u32,
     pub boss_damage: u64,
     pub claimed_at: i64,
+    pub gold_reward: u64,
+    pub player_gold_balance: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1278,6 +1291,7 @@ pub struct ClearEnemyOutcome {
     pub clear_count: u64,
     pub difficulty_level: u16,
     pub energy_spent: u16,
+    pub gold_reward: u64,
     pub next_available_at: i64,
     pub rare_eligibility_points_awarded: u32,
 }
@@ -1428,6 +1442,7 @@ pub struct PlayerRun {
     pub entered_at: i64,
     pub active: bool,
     pub bump: u8,
+    pub gold_balance: u64,
 }
 
 /// PDA: ["boss_shard", day_id, shard_index]
@@ -1689,14 +1704,14 @@ fn validate_buy_item(
     require!(available_stock > 0, PackrunError::InsufficientStock);
 
     // Compute expected price and verify match
-    let computed_price = compute_shop_price(
-        slot.base_price,
-        restock_epoch,
-        slot.sold_count,
-    )?;
+    let computed_price = compute_shop_price(slot.base_price, restock_epoch, slot.sold_count)?;
     require!(
         expected_price == computed_price,
         PackrunError::PriceMismatch
+    );
+    require!(
+        player_run.gold_balance >= expected_price,
+        PackrunError::InsufficientGold
     );
 
     // Check per-wallet daily purchase limit
@@ -1713,8 +1728,14 @@ fn validate_buy_item(
 fn apply_buy_item_state(
     slot: &mut ShopItemSlotAccount,
     player_run: &mut PlayerRun,
+    price_paid: u64,
     _now: i64,
 ) -> Result<()> {
+    player_run.gold_balance = player_run
+        .gold_balance
+        .checked_sub(price_paid)
+        .ok_or(error!(PackrunError::InsufficientGold))?;
+
     // Decrease stock (increase sold_count)
     slot.sold_count = slot
         .sold_count
@@ -1870,10 +1891,7 @@ fn validate_claim_boss_participation_nft(
     );
 
     // Player must not have already claimed for this day
-    require!(
-        !nft_claim.claimed(),
-        PackrunError::BossNftAlreadyClaimed
-    );
+    require!(!nft_claim.claimed(), PackrunError::BossNftAlreadyClaimed);
 
     // Contribution must belong to this player
     require!(
@@ -1954,10 +1972,7 @@ fn validate_claim_daily_reward(
 /// Tiers are evaluated from highest (Legendary) to lowest (Common).
 /// If no tier is met, falls back to Common (entry reward — claimable immediately
 /// upon entering the dungeon, even with 0 cleared locations).
-fn compute_daily_reward_tier(
-    dungeon: &DailyDungeon,
-    player_run: &PlayerRun,
-) -> Result<RewardTier> {
+fn compute_daily_reward_tier(dungeon: &DailyDungeon, player_run: &PlayerRun) -> Result<RewardTier> {
     let cleared = player_run.cleared_locations;
     let boss_damage = player_run.boss_damage;
 
@@ -1968,9 +1983,7 @@ fn compute_daily_reward_tier(
     const LEGENDARY_THRESHOLD: u16 = 256;
     if cleared >= 12 && boss_damage >= 1500 {
         let hash_input = {
-            let mut buf = Vec::with_capacity(
-                dungeon.day_id.len() + 32 + 8 + 4,
-            );
+            let mut buf = Vec::with_capacity(dungeon.day_id.len() + 32 + 8 + 4);
             buf.extend_from_slice(dungeon.day_id.as_bytes());
             buf.extend_from_slice(player_run.player.as_ref());
             buf.extend_from_slice(&boss_damage.to_le_bytes());
@@ -1978,10 +1991,7 @@ fn compute_daily_reward_tier(
             buf
         };
         let hash_result = solana_sha256_hasher::hash(&hash_input);
-        let threshold = u16::from_le_bytes([
-            hash_result.to_bytes()[0],
-            hash_result.to_bytes()[1],
-        ]);
+        let threshold = u16::from_le_bytes([hash_result.to_bytes()[0], hash_result.to_bytes()[1]]);
         if threshold < LEGENDARY_THRESHOLD {
             return Ok(RewardTier::Legendary);
         }
@@ -2009,11 +2019,14 @@ fn compute_daily_reward_tier(
 
 fn apply_claim_daily_reward(
     daily_reward_claim: &mut DailyRewardClaim,
+    player_run: &mut PlayerRun,
     dungeon: &DailyDungeon,
     reward_tier: RewardTier,
     player_pubkey: Pubkey,
     now: i64,
 ) -> Result<()> {
+    award_player_gold(player_run, DEFAULT_TREASURE_GOLD_REWARD)?;
+
     daily_reward_claim.day_id = dungeon.day_id.clone();
     daily_reward_claim.player = player_pubkey;
     daily_reward_claim.reward_pool = Pubkey::default(); // No reward pool in MVP
@@ -2050,7 +2063,8 @@ fn compute_restock_epoch(opened_at: i64, current_time: i64, interval: i64) -> Re
     if elapsed < 0 {
         return Ok(0);
     }
-    let epoch = (elapsed as u64).checked_div(interval as u64)
+    let epoch = (elapsed as u64)
+        .checked_div(interval as u64)
         .ok_or(error!(PackrunError::ArithmeticOverflow))?;
     Ok(epoch)
 }
@@ -2066,7 +2080,11 @@ fn compute_available_stock(
     }
     let restock_size = base_stock as u64;
     let lifetime_supply = restock_size
-        .checked_mul(restock_epoch.checked_add(1).ok_or(error!(PackrunError::ArithmeticOverflow))?)
+        .checked_mul(
+            restock_epoch
+                .checked_add(1)
+                .ok_or(error!(PackrunError::ArithmeticOverflow))?,
+        )
         .ok_or(error!(PackrunError::ArithmeticOverflow))?;
     let unsold_supply = if sold_count >= lifetime_supply {
         0u64
@@ -2078,11 +2096,7 @@ fn compute_available_stock(
     Ok(unsold_supply.min(max_stock as u64))
 }
 
-fn compute_shop_price(
-    base_price: u64,
-    restock_epoch: u64,
-    sold_count: u64,
-) -> Result<u64> {
+fn compute_shop_price(base_price: u64, restock_epoch: u64, sold_count: u64) -> Result<u64> {
     let restock_increase = (restock_epoch as u64)
         .checked_mul(DEFAULT_RESTOCK_PRICE_INCREASE_BPS)
         .ok_or(error!(PackrunError::ArithmeticOverflow))?;
@@ -2099,7 +2113,11 @@ fn compute_shop_price(
         .ok_or(error!(PackrunError::ArithmeticOverflow))?;
     // Ceiling division: (numerator + denominator - 1) / denominator
     let price = price_numer
-        .checked_add(BPS_DENOMINATOR.checked_sub(1).ok_or(error!(PackrunError::ArithmeticOverflow))?)
+        .checked_add(
+            BPS_DENOMINATOR
+                .checked_sub(1)
+                .ok_or(error!(PackrunError::ArithmeticOverflow))?,
+        )
         .ok_or(error!(PackrunError::ArithmeticOverflow))?
         .checked_div(BPS_DENOMINATOR)
         .ok_or(error!(PackrunError::ArithmeticOverflow))?;
@@ -2122,12 +2140,9 @@ fn apply_clear_enemy_state(
         .ok_or(error!(PackrunError::EnemyClearOverflow))?;
     let clear_count_after_u16 =
         u16::try_from(clear_count_after).map_err(|_| error!(PackrunError::EnemyClearOverflow))?;
-    let difficulty_level =
-        compute_enemy_difficulty_level(enemy.level, clear_count_after_u16)?;
-    let cooldown_seconds = compute_enemy_cooldown_seconds(
-        enemy.base_cooldown_seconds,
-        clear_count_after_u16,
-    )?;
+    let difficulty_level = compute_enemy_difficulty_level(enemy.level, clear_count_after_u16)?;
+    let cooldown_seconds =
+        compute_enemy_cooldown_seconds(enemy.base_cooldown_seconds, clear_count_after_u16)?;
     let next_available_at = now
         .checked_add(cooldown_seconds)
         .ok_or(error!(PackrunError::EnemyClearOverflow))?;
@@ -2147,6 +2162,9 @@ fn apply_clear_enemy_state(
         .rare_eligibility_points
         .checked_add(rare_eligibility_points_awarded)
         .ok_or(error!(PackrunError::EnemyClearOverflow))?;
+    let gold_reward = DEFAULT_ENEMY_CLEAR_GOLD_REWARD
+        .checked_add(u64::from(difficulty_level))
+        .ok_or(error!(PackrunError::GoldOverflow))?;
 
     enemy.clear_count = clear_count_after;
     enemy.difficulty_level = difficulty_level;
@@ -2155,14 +2173,24 @@ fn apply_clear_enemy_state(
     player_run.cleared_locations = cleared_locations_after;
     player_run.common_loot_count = common_loot_count_after;
     player_run.rare_eligibility_points = rare_eligibility_points_after;
+    award_player_gold(player_run, gold_reward)?;
 
     Ok(ClearEnemyOutcome {
         clear_count: clear_count_after,
         difficulty_level,
         energy_spent: DEFAULT_ENEMY_CLEAR_ENERGY_COST,
+        gold_reward,
         next_available_at,
         rare_eligibility_points_awarded,
     })
+}
+
+fn award_player_gold(player_run: &mut PlayerRun, gold_reward: u64) -> Result<u64> {
+    player_run.gold_balance = player_run
+        .gold_balance
+        .checked_add(gold_reward)
+        .ok_or(error!(PackrunError::GoldOverflow))?;
+    Ok(player_run.gold_balance)
 }
 
 fn compute_enemy_difficulty_level(base_level: u16, clear_count_after: u16) -> Result<u16> {
@@ -2549,6 +2577,10 @@ pub enum PackrunError {
     PriceMismatch,
     #[msg("player has exceeded the per-wallet daily purchase limit for this item.")]
     PurchaseLimitExceeded,
+    #[msg("player does not have enough gold.")]
+    InsufficientGold,
+    #[msg("player gold balance overflowed.")]
+    GoldOverflow,
     #[msg("damage_score must be greater than zero.")]
     InvalidDamageScore,
     #[msg("damage_score exceeds the maximum allowed per submission.")]
@@ -2802,17 +2834,15 @@ mod tests {
         enemy.next_available_at = 1_600;
         let player_run = test_player_run();
 
-        assert!(
-            validate_clear_enemy(
-                &dungeon,
-                &location,
-                Pubkey::default(),
-                &enemy,
-                &player_run,
-                1_500,
-            )
-            .is_err()
-        );
+        assert!(validate_clear_enemy(
+            &dungeon,
+            &location,
+            Pubkey::default(),
+            &enemy,
+            &player_run,
+            1_500,
+        )
+        .is_err());
     }
 
     #[test]
@@ -2822,17 +2852,15 @@ mod tests {
         let enemy = test_enemy_location();
         let player_run = test_player_run();
 
-        assert!(
-            validate_clear_enemy(
-                &dungeon,
-                &location,
-                Pubkey::new_unique(),
-                &enemy,
-                &player_run,
-                1_500,
-            )
-            .is_err()
-        );
+        assert!(validate_clear_enemy(
+            &dungeon,
+            &location,
+            Pubkey::new_unique(),
+            &enemy,
+            &player_run,
+            1_500,
+        )
+        .is_err());
     }
 
     #[test]
@@ -2857,6 +2885,14 @@ mod tests {
         assert_eq!(
             player_run.rare_eligibility_points,
             DEFAULT_RARE_ELIGIBILITY_POINTS_PER_CLEAR
+        );
+        assert_eq!(
+            outcome.gold_reward,
+            DEFAULT_ENEMY_CLEAR_GOLD_REWARD + u64::from(outcome.difficulty_level)
+        );
+        assert_eq!(
+            player_run.gold_balance,
+            DEFAULT_STARTING_GOLD + outcome.gold_reward
         );
     }
 
@@ -2935,7 +2971,14 @@ mod tests {
         assert_eq!(price, 25);
 
         assert!(validate_buy_item(
-            &dungeon, &location, shop_key, &slot, &player_run, 0, price, 1_500,
+            &dungeon,
+            &location,
+            shop_key,
+            &slot,
+            &player_run,
+            0,
+            price,
+            1_500,
         )
         .is_ok());
     }
@@ -2949,7 +2992,14 @@ mod tests {
         let player_run = test_player_run();
 
         assert!(validate_buy_item(
-            &dungeon, &location, shop_key, &slot, &player_run, 0, 25, 1_500,
+            &dungeon,
+            &location,
+            shop_key,
+            &slot,
+            &player_run,
+            0,
+            25,
+            1_500,
         )
         .is_err());
     }
@@ -2963,7 +3013,14 @@ mod tests {
         let player_run = test_player_run();
 
         assert!(validate_buy_item(
-            &dungeon, &location, shop_key, &slot, &player_run, 0, 25, 1_500,
+            &dungeon,
+            &location,
+            shop_key,
+            &slot,
+            &player_run,
+            0,
+            25,
+            1_500,
         )
         .is_err());
     }
@@ -2978,7 +3035,14 @@ mod tests {
         player_run.active = false;
 
         assert!(validate_buy_item(
-            &dungeon, &location, shop_key, &slot, &player_run, 0, 25, 1_500,
+            &dungeon,
+            &location,
+            shop_key,
+            &slot,
+            &player_run,
+            0,
+            25,
+            1_500,
         )
         .is_err());
     }
@@ -2993,7 +3057,14 @@ mod tests {
         let player_run = test_player_run();
 
         assert!(validate_buy_item(
-            &dungeon, &location, shop_key, &slot, &player_run, 0, 25, 1_500,
+            &dungeon,
+            &location,
+            shop_key,
+            &slot,
+            &player_run,
+            0,
+            25,
+            1_500,
         )
         .is_err());
     }
@@ -3008,7 +3079,36 @@ mod tests {
 
         // expected_price=99 but computed price=25
         assert!(validate_buy_item(
-            &dungeon, &location, shop_key, &slot, &player_run, 0, 99, 1_500,
+            &dungeon,
+            &location,
+            shop_key,
+            &slot,
+            &player_run,
+            0,
+            99,
+            1_500,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn buy_item_fails_when_gold_is_insufficient() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_shop_location_account();
+        let shop_key = Pubkey::default();
+        let slot = test_shop_item_slot_account();
+        let mut player_run = test_player_run();
+        player_run.gold_balance = 24;
+
+        assert!(validate_buy_item(
+            &dungeon,
+            &location,
+            shop_key,
+            &slot,
+            &player_run,
+            0,
+            25,
+            1_500,
         )
         .is_err());
     }
@@ -3024,7 +3124,14 @@ mod tests {
         player_run.items_purchased = 2;
 
         assert!(validate_buy_item(
-            &dungeon, &location, shop_key, &slot, &player_run, 0, 25, 1_500,
+            &dungeon,
+            &location,
+            shop_key,
+            &slot,
+            &player_run,
+            0,
+            25,
+            1_500,
         )
         .is_err());
     }
@@ -3035,14 +3142,17 @@ mod tests {
         let mut player_run = test_player_run();
         let previous_sold = slot.sold_count;
         let previous_items = player_run.items_purchased;
+        let previous_gold = player_run.gold_balance;
+        let price = 25;
 
-        apply_buy_item_state(&mut slot, &mut player_run, 1_500).unwrap();
+        apply_buy_item_state(&mut slot, &mut player_run, price, 1_500).unwrap();
 
         assert_eq!(slot.sold_count, previous_sold + 1);
         assert_eq!(
             player_run.items_purchased,
             previous_items + DEFAULT_ITEMS_PURCHASED_PER_BUY
         );
+        assert_eq!(player_run.gold_balance, previous_gold - price);
     }
 
     #[test]
@@ -3343,7 +3453,15 @@ mod tests {
         let now = 1_500;
 
         // First submission
-        apply_submit_boss_damage(&mut shard, &mut contribution, &mut player_run, 500, now, 246).unwrap();
+        apply_submit_boss_damage(
+            &mut shard,
+            &mut contribution,
+            &mut player_run,
+            500,
+            now,
+            246,
+        )
+        .unwrap();
 
         // Second submission
         let outcome = apply_submit_boss_damage(
@@ -3730,6 +3848,7 @@ mod tests {
             day_id: "2026-04-25".to_string(),
             energy: DEFAULT_PLAYER_RUN_ENERGY,
             entered_at: 1_000,
+            gold_balance: DEFAULT_STARTING_GOLD,
             items_purchased: 0,
             player: Pubkey::default(),
             rare_eligibility_points: 0,
@@ -3984,10 +4103,13 @@ mod tests {
     fn apply_claim_daily_reward_sets_fields_correctly() {
         let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
         let mut claim = test_daily_reward_claim_unclaimed();
+        let mut player_run = test_player_run();
+        let previous_gold = player_run.gold_balance;
         let now = 3_000;
 
         apply_claim_daily_reward(
             &mut claim,
+            &mut player_run,
             &dungeon,
             RewardTier::Epic,
             Pubkey::default(),
@@ -4000,6 +4122,10 @@ mod tests {
         assert_eq!(claim.reward_tier, RewardTier::Epic);
         assert_eq!(claim.claimed_at, now);
         assert!(claim.claimed());
+        assert_eq!(
+            player_run.gold_balance,
+            previous_gold + DEFAULT_TREASURE_GOLD_REWARD
+        );
     }
 
     fn test_daily_reward_claim_unclaimed() -> DailyRewardClaim {

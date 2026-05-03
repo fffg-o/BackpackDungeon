@@ -51,6 +51,8 @@ export interface DailyDungeonState {
 
 export interface PlayerRunState {
   readonly energy: number;
+  readonly goldBalance: number;
+  readonly hasGoldBalance: boolean;
   readonly clearedLocations: number;
   readonly bossDamage: number;
   readonly commonLootCount: number;
@@ -148,8 +150,19 @@ export async function fetchPlayerRun(
   player: PublicKey,
 ): Promise<PlayerRunState | null> {
   const [address] = playerRunPda(dayId, player);
-  const account = await program.account.playerRun.fetchNullable(address);
-  return account ? normalizePlayerRun(account) : null;
+  try {
+    const account = await program.account.playerRun.fetchNullable(address);
+    return account ? normalizePlayerRun(account) : null;
+  } catch (error) {
+    const legacyPlayerRun = await fetchLegacyPlayerRun(program, address);
+    if (legacyPlayerRun) {
+      if (!legacyPlayerRun.hasGoldBalance) {
+        warnMissingGoldBalance("legacy PlayerRun account");
+      }
+      return legacyPlayerRun;
+    }
+    throw error;
+  }
 }
 
 export async function fetchPoiOnChainState(
@@ -417,8 +430,16 @@ function normalizeDailyDungeon(account: DailyDungeonAccount): DailyDungeonState 
 }
 
 function normalizePlayerRun(account: PlayerRunAccount): PlayerRunState {
+  const rawGoldBalance = account.goldBalance ?? account.gold_balance;
+  const hasGoldBalance = rawGoldBalance !== undefined && rawGoldBalance !== null;
+  if (!hasGoldBalance) {
+    warnMissingGoldBalance("PlayerRun account");
+  }
+
   return {
     energy: account.energy,
+    goldBalance: hasGoldBalance ? toNumber(rawGoldBalance ?? 0, "playerRun.goldBalance") : 0,
+    hasGoldBalance,
     clearedLocations: account.clearedLocations,
     bossDamage: toNumber(account.bossDamage, "playerRun.bossDamage"),
     commonLootCount: account.commonLootCount,
@@ -505,4 +526,148 @@ function pubkeyString(value: unknown): string {
 
 function bytesToHex(bytes: readonly number[]): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function fetchLegacyPlayerRun(
+  program: PackrunProgram,
+  address: PublicKey,
+): Promise<PlayerRunState | null> {
+  const connection = (
+    program.provider as {
+      readonly connection?: {
+        readonly getAccountInfo: (
+          address: PublicKey,
+        ) => Promise<{ readonly data: Uint8Array } | null>;
+      };
+    }
+  ).connection;
+  if (!connection) return null;
+
+  const accountInfo = await connection.getAccountInfo(address);
+  if (!accountInfo) return null;
+
+  return decodePlayerRunAccountData(accountInfo.data);
+}
+
+function decodePlayerRunAccountData(data: Uint8Array): PlayerRunState | null {
+  try {
+    const reader = new AccountDataReader(data);
+    reader.skip(8);
+    reader.readString();
+    reader.skip(32);
+    reader.skip(32);
+
+    const energy = reader.readU16();
+    const clearedLocations = reader.readU32();
+    const bossDamage = toNumber(reader.readU64(), "playerRun.bossDamage");
+    const commonLootCount = reader.readU32();
+    const rareEligibilityPoints = reader.readU32();
+    const itemsPurchased = reader.readU32();
+    const enteredAt = toNumber(reader.readI64(), "playerRun.enteredAt");
+    const active = reader.readBool();
+    reader.readU8();
+
+    const hasGoldBalance = reader.remaining >= 8;
+    const goldBalance = hasGoldBalance
+      ? toNumber(reader.readU64(), "playerRun.goldBalance")
+      : 0;
+
+    return {
+      energy,
+      goldBalance,
+      hasGoldBalance,
+      clearedLocations,
+      bossDamage,
+      commonLootCount,
+      rareEligibilityPoints,
+      itemsPurchased,
+      enteredAt,
+      active,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const missingGoldBalanceWarnings = new Set<string>();
+
+function warnMissingGoldBalance(source: string): void {
+  if (process.env.NODE_ENV === "production" || missingGoldBalanceWarnings.has(source)) {
+    return;
+  }
+  missingGoldBalanceWarnings.add(source);
+  console.warn(
+    `[packrun] ${source} has no goldBalance/gold_balance field; showing 0. Re-enter dungeon or reset localnet after gold migration.`,
+  );
+}
+
+class AccountDataReader {
+  private offset = 0;
+  private readonly view: DataView;
+
+  constructor(private readonly data: Uint8Array) {
+    this.view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  }
+
+  get remaining(): number {
+    return this.data.byteLength - this.offset;
+  }
+
+  skip(bytes: number): void {
+    this.ensure(bytes);
+    this.offset += bytes;
+  }
+
+  readString(): string {
+    const length = this.readU32();
+    this.ensure(length);
+    const bytes = this.data.slice(this.offset, this.offset + length);
+    this.offset += length;
+    return new TextDecoder().decode(bytes);
+  }
+
+  readU8(): number {
+    this.ensure(1);
+    const value = this.view.getUint8(this.offset);
+    this.offset += 1;
+    return value;
+  }
+
+  readBool(): boolean {
+    return this.readU8() !== 0;
+  }
+
+  readU16(): number {
+    this.ensure(2);
+    const value = this.view.getUint16(this.offset, true);
+    this.offset += 2;
+    return value;
+  }
+
+  readU32(): number {
+    this.ensure(4);
+    const value = this.view.getUint32(this.offset, true);
+    this.offset += 4;
+    return value;
+  }
+
+  readU64(): bigint {
+    this.ensure(8);
+    const value = this.view.getBigUint64(this.offset, true);
+    this.offset += 8;
+    return value;
+  }
+
+  readI64(): bigint {
+    this.ensure(8);
+    const value = this.view.getBigInt64(this.offset, true);
+    this.offset += 8;
+    return value;
+  }
+
+  private ensure(bytes: number): void {
+    if (this.remaining < bytes) {
+      throw new RangeError("Account data is shorter than expected.");
+    }
+  }
 }

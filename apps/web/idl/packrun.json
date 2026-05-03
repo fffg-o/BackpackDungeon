@@ -433,6 +433,7 @@
         },
         {
           "name": "player_run",
+          "writable": true,
           "pda": {
             "seeds": [
               {
@@ -2229,76 +2230,86 @@
     },
     {
       "code": 6031,
+      "name": "InsufficientGold",
+      "msg": "player does not have enough gold."
+    },
+    {
+      "code": 6032,
+      "name": "GoldOverflow",
+      "msg": "player gold balance overflowed."
+    },
+    {
+      "code": 6033,
       "name": "InvalidDamageScore",
       "msg": "damage_score must be greater than zero."
     },
     {
-      "code": 6032,
+      "code": 6034,
       "name": "DamageScoreExceeded",
       "msg": "damage_score exceeds the maximum allowed per submission."
     },
     {
-      "code": 6033,
+      "code": 6035,
       "name": "ShardIndexMismatch",
       "msg": "shard_index does not match the player's assigned shard."
     },
     {
-      "code": 6034,
+      "code": 6036,
       "name": "BossSubmissionLimitExceeded",
       "msg": "player has exceeded the boss submission limit for this daily dungeon."
     },
     {
-      "code": 6035,
+      "code": 6037,
       "name": "LocationIsNotBoss",
       "msg": "location is not a boss location."
     },
     {
-      "code": 6036,
+      "code": 6038,
       "name": "InvalidBossDamageShard",
       "msg": "boss damage shard account is invalid."
     },
     {
-      "code": 6037,
+      "code": 6039,
       "name": "InvalidBossContribution",
       "msg": "player boss contribution account is invalid."
     },
     {
-      "code": 6038,
+      "code": 6040,
       "name": "InvalidBossLocation",
       "msg": "boss location account is invalid."
     },
     {
-      "code": 6039,
+      "code": 6041,
       "name": "InsufficientBossDamage",
       "msg": "player has not dealt enough damage to claim the boss NFT."
     },
     {
-      "code": 6040,
+      "code": 6042,
       "name": "BossNftAlreadyClaimed",
       "msg": "player has already claimed the boss NFT for this daily dungeon."
     },
     {
-      "code": 6041,
+      "code": 6043,
       "name": "DungeonNotEnded",
       "msg": "daily dungeon has not ended yet."
     },
     {
-      "code": 6042,
+      "code": 6044,
       "name": "DailyRewardAlreadyClaimed",
       "msg": "player has already claimed the daily reward for this dungeon."
     },
     {
-      "code": 6043,
+      "code": 6045,
       "name": "DailyRewardTierNotMet",
       "msg": "player run does not satisfy any reward tier condition."
     },
     {
-      "code": 6044,
+      "code": 6046,
       "name": "PlayerRunNotFound",
       "msg": "player run not found for this day and player."
     },
     {
-      "code": 6045,
+      "code": 6047,
       "name": "LocationIsNotTreasure",
       "msg": "location is not a treasure."
     }
@@ -2742,6 +2753,14 @@
           {
             "name": "claimed_at",
             "type": "i64"
+          },
+          {
+            "name": "gold_reward",
+            "type": "u64"
+          },
+          {
+            "name": "player_gold_balance",
+            "type": "u64"
           }
         ]
       }
@@ -2826,6 +2845,14 @@
                 ]
               }
             }
+          },
+          {
+            "name": "gold_reward",
+            "type": "u64"
+          },
+          {
+            "name": "player_gold_balance",
+            "type": "u64"
           },
           {
             "name": "rare_eligibility_points_awarded",
@@ -2984,12 +3011,20 @@
             "type": "u64"
           },
           {
+            "name": "price_paid",
+            "type": "u64"
+          },
+          {
             "name": "sold_count",
             "type": "u64"
           },
           {
             "name": "player_item_count",
             "type": "u32"
+          },
+          {
+            "name": "player_gold_balance",
+            "type": "u64"
           }
         ]
       }
@@ -3366,6 +3401,10 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "gold_balance",
+            "type": "u64"
           }
         ]
       }
