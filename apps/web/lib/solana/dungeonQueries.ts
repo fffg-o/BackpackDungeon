@@ -65,6 +65,8 @@ export interface ShopSlotState {
   readonly slotIndex: number;
   readonly itemId?: string;
   readonly rewardTier?: string;
+  readonly baseStock?: number;
+  readonly maxStock?: number;
   readonly basePrice?: number;
   readonly currentPrice?: number;
   readonly expectedPrice?: string;
@@ -72,6 +74,9 @@ export interface ShopSlotState {
   readonly available?: number;
   readonly price?: number;
   readonly soldCount?: number;
+  readonly openedAt?: number;
+  readonly restockEpoch?: number;
+  readonly restockIntervalSeconds?: number;
   readonly perWalletDailyLimit?: number;
 }
 
@@ -255,6 +260,7 @@ export async function fetchShopState(
       });
       const availableStock = toSafeNumber(computed.availableStock, "availableStock");
       const currentPrice = toSafeNumber(computed.currentPrice, "currentPrice");
+      const restockEpoch = toSafeNumber(computed.restockEpoch, "restockEpoch");
 
       return [
         index,
@@ -263,6 +269,8 @@ export async function fetchShopState(
           slotIndex: index,
           itemId: slot.itemId,
           rewardTier: enumVariant(slot.rewardTier),
+          baseStock: toNumber(slot.baseStock, "shopItemSlot.baseStock"),
+          maxStock: toNumber(slot.maxStock, "shopItemSlot.maxStock"),
           basePrice: toNumber(slot.basePrice, "shopItemSlot.basePrice"),
           currentPrice,
           expectedPrice: computed.currentPrice.toString(),
@@ -270,6 +278,12 @@ export async function fetchShopState(
           available: availableStock,
           price: currentPrice,
           soldCount: toNumber(slot.soldCount, "shopItemSlot.soldCount"),
+          openedAt: toNumber(slot.openedAt, "shopItemSlot.openedAt"),
+          restockEpoch,
+          restockIntervalSeconds: toNumber(
+            slot.restockIntervalSeconds,
+            "shopItemSlot.restockIntervalSeconds",
+          ),
           perWalletDailyLimit: slot.perWalletDailyLimit,
         } satisfies ShopSlotState,
       ];

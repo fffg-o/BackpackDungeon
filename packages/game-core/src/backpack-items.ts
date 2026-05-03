@@ -62,6 +62,11 @@ export interface BackpackItemInstanceV1 {
   readonly acquiredAt: number;
 }
 
+export interface BackpackItemPreviewV1 {
+  readonly definitionId: string;
+  readonly definition: BackpackItemDefinitionV1;
+}
+
 export interface CreateBackpackItemSourceParams {
   readonly dayId: string;
   readonly player: string;
@@ -558,13 +563,7 @@ export function createBackpackItemFromShopSlot(
   slot: ShopItemSlot,
   params: CreateBackpackItemFromShopSlotParams
 ): BackpackItemInstanceV1 {
-  const definitionId = resolveDefinitionId(slot.itemId, slot.rewardTier, {
-    dayId: params.dayId,
-    itemId: slot.itemId,
-    player: params.player,
-    sourceKind: "shop",
-    sourceRef: params.sourceRef ?? slot.slotId
-  });
+  const definitionId = previewBackpackItemFromShopSlot(slot).definitionId;
   const sourceRef =
     params.sourceRef ??
     params.signature ??
@@ -574,6 +573,22 @@ export function createBackpackItemFromShopSlot(
     ...params,
     sourceRef
   });
+}
+
+export function previewBackpackItemFromShopSlot(slot: ShopItemSlot): BackpackItemPreviewV1 {
+  const definitionId = resolveDefinitionId(slot.itemId, slot.rewardTier, {
+    dayId: "preview",
+    itemId: slot.itemId,
+    player: "preview",
+    sourceKind: "shop",
+    sourceRef: slot.slotId
+  });
+  const definition = getBackpackItemDefinition(definitionId);
+
+  return {
+    definition,
+    definitionId: definition.id
+  };
 }
 
 export function createBackpackItemFromTreasure(

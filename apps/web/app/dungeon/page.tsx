@@ -15,11 +15,15 @@ import {
   createBackpackItemFromTreasure,
   createDailyMapInput,
   generateDailyMap,
+  getBackpackItemDefinition,
+  getItemSize,
   getLocationProof,
   parseDailyMapRandomSeed,
+  previewBackpackItemFromShopSlot,
   simulateBossBattle,
   simulateEnemyBattle,
   todayDayId,
+  type BackpackItemDefinitionV1,
   type BattlePlayerSnapshotV1,
   type BattleResultV1,
   type BattleCombatantStatsV1,
@@ -48,7 +52,7 @@ import {
   initShopItemSlot,
   submitBossDamage,
 } from "../../lib/solana/dungeonTxs";
-import { bossShardIndexForPlayer, sha256Bytes32 } from "../../lib/solana/pdas";
+import { bossShardIndexForPlayer, locationPda, sha256Bytes32 } from "../../lib/solana/pdas";
 import styles from "./dungeon.module.css";
 
 const ENABLE_MANUAL_POI_INIT =
@@ -79,7 +83,7 @@ type BattlePhase =
     }
   | { readonly phase: "result"; readonly result: BattleResultV1; readonly inputClearCount: number }
   | { readonly phase: "submitting" }
-  | { readonly phase: "success"; readonly signature: string; readonly result: BattleResultV1 }
+  | { readonly phase: "success"; readonly signature: string; readonly result?: BattleResultV1 }
   | { readonly phase: "error"; readonly message: string };
 
 type ShopActionPhase =
@@ -101,7 +105,7 @@ type BossBattlePhase =
     }
   | { readonly phase: "result"; readonly result: BattleResultV1; readonly damage: number }
   | { readonly phase: "submitting" }
-  | { readonly phase: "success"; readonly damage: number; readonly signature: string; readonly result: BattleResultV1 }
+  | { readonly phase: "success"; readonly damage: number; readonly signature: string; readonly result?: BattleResultV1 }
   | { readonly phase: "error"; readonly message: string };
 
 type TxPending =
@@ -116,6 +120,14 @@ type TxPending =
   | `initShopSlot:${number}`
   | `buyItem:${number}`;
 
+interface DungeonToast {
+  readonly id: number;
+  readonly title: string;
+  readonly message?: string;
+  readonly signature?: string;
+  readonly variant?: "success" | "warning" | "error";
+}
+
 const MAP_INPUT: DailyMapInput = createDailyMapInput({
   dayId: process.env.NEXT_PUBLIC_PACKRUN_DAY_ID || todayDayId(),
   randomSeed: parseDailyMapRandomSeed(process.env.NEXT_PUBLIC_PACKRUN_RANDOM_SEED),
@@ -124,12 +136,13 @@ const MAP_INPUT: DailyMapInput = createDailyMapInput({
 const ENEMY_CLEAR_ENERGY_COST = 5;
 const EXPLORER_CLUSTER = "devnet";
 const BATTLE_REPLAY_STEP_MS = 450;
+const MINIMUM_BOSS_NFT_DAMAGE = 1;
 
 const POI_ICONS: Record<LocationKindType, string> = {
   [LocationKind.Enemy]: "⚔️",
-  [LocationKind.Shop]: "🏪",
+  [LocationKind.Shop]: "🛒",
   [LocationKind.Treasure]: "💎",
-  [LocationKind.Boss]: "👹",
+  [LocationKind.Boss]: "👑",
   [LocationKind.Event]: "❓",
 };
 
@@ -172,6 +185,11 @@ function shortSignature(signature: string): string {
   return `${signature.slice(0, 8)}...${signature.slice(-8)}`;
 }
 
+function shortId(value: string): string {
+  if (value.length <= 14) return value;
+  return `${value.slice(0, 7)}...${value.slice(-5)}`;
+}
+
 function explorerTxUrl(signature: string): string {
   return `https://explorer.solana.com/tx/${signature}?cluster=${EXPLORER_CLUSTER}`;
 }
@@ -185,6 +203,100 @@ function formatNextAvailable(nextAvailableAt: number | undefined): string {
     minute: "2-digit",
     second: "2-digit",
   });
+}
+
+function formatDurationSeconds(totalSeconds: number | undefined): string {
+  if (!totalSeconds || totalSeconds <= 0) return "Not scheduled";
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function shopPurchaseSourceRef(
+  dayId: string,
+  poiId: string,
+  slotIndex: number,
+  txSignature: string,
+): string {
+  return `${dayId}:${poiId}:${slotIndex}:${txSignature}`;
+}
+
+function treasureSourceRef(spec: DailyLocationSpec): string {
+  return bytesToHex(sha256Bytes32(spec.id));
+}
+
+function locationPdaLabel(dayId: string, spec: DailyLocationSpec): string {
+  return locationPda(dayId, sha256Bytes32(spec.id))[0].toBase58();
+}
+
+function itemIcon(definition: BackpackItemDefinitionV1): string {
+  const icons: Readonly<Record<string, string>> = {
+    armor: "🛡️",
+    bomb: "💣",
+    charm: "✨",
+    dagger: "🗡️",
+    key: "🔑",
+    potion: "🧪",
+    ration: "🥫",
+    ruby: "💎",
+    shield: "🛡️",
+    ward: "🔷",
+  };
+  return icons[definition.icon] ?? definition.icon;
+}
+
+function itemEffectSummary(definition: BackpackItemDefinitionV1): string {
+  if (definition.effects.length === 0) return definition.description;
+  return definition.effects.map((effect) => effect.description).join(" ");
+}
+
+function adjacencyHints(definition: BackpackItemDefinitionV1): readonly string[] {
+  if (definition.kind === "gem" && definition.tags.includes("ruby")) {
+    return ["Next to a weapon: +1 ATK."];
+  }
+  if (definition.kind === "charm") {
+    return ["Next to a gem: +100 crit bps."];
+  }
+  if (definition.kind === "ward") {
+    return ["Next to armor: +1 DEF."];
+  }
+  if (definition.kind === "weapon") {
+    return ["Ruby touching this weapon gains +1 ATK."];
+  }
+  if (definition.kind === "armor") {
+    return ["Ward touching this armor gains +1 DEF."];
+  }
+  return ["No adjacency bonus."];
+}
+
+function shopRestockInfo(stockInfo: NonNullable<PoiOnChainState["stock"]>[number] | undefined): string {
+  if (!stockInfo?.initialized) return "Initialize slot to sync restock.";
+  const epoch = stockInfo.restockEpoch ?? 0;
+  const interval = formatDurationSeconds(stockInfo.restockIntervalSeconds);
+  return `Restock epoch ${epoch}; interval ${interval}.`;
+}
+
+function shopStockLabel(
+  stockInfo: NonNullable<PoiOnChainState["stock"]>[number] | undefined,
+  fallbackStock: number,
+): string {
+  if (!stockInfo?.initialized) return `${fallbackStock} base`;
+  const available = stockInfo.availableStock ?? stockInfo.available ?? 0;
+  const maxStock = stockInfo.maxStock ?? fallbackStock;
+  return `${available} / ${maxStock}`;
+}
+
+function shopTileStock(onChain: PoiOnChainState | null): string | null {
+  const stockEntries = Object.values(onChain?.stock ?? {});
+  if (stockEntries.length === 0) return null;
+  const available = stockEntries.reduce(
+    (total, entry) => total + (entry.availableStock ?? entry.available ?? 0),
+    0,
+  );
+  return `${stockEntries.length}/${available}`;
 }
 
 function shopTxKey(kind: "initShopSlot" | "buyItem", slotIndex: number): TxPending {
@@ -347,6 +459,7 @@ export default function DailyDungeonPage() {
   const [txSignature, setTxSignature] = useState<string | null>(null);
   const [chainError, setChainError] = useState<string | null>(null);
   const [hoveredPoi, setHoveredPoi] = useState<DailyLocationSpec | null>(null);
+  const [poiChainStates, setPoiChainStates] = useState<Readonly<Record<string, PoiOnChainState>>>({});
   const [enterPhase, setEnterPhase] = useState<TxPhase>({ phase: "idle" });
   const [initLocationPhase, setInitLocationPhase] = useState<TxPhase>({ phase: "idle" });
   const [battlePhase, setBattlePhase] = useState<BattlePhase>({ phase: "idle" });
@@ -355,11 +468,13 @@ export default function DailyDungeonPage() {
   const [dailyRewardPhase, setDailyRewardPhase] = useState<TxPhase>({ phase: "idle" });
   const [bossNftClaimPhase, setBossNftClaimPhase] = useState<TxPhase>({ phase: "idle" });
   const [battleOverlayTarget, setBattleOverlayTarget] = useState<"enemy" | "boss" | null>(null);
+  const [toast, setToast] = useState<DungeonToast | null>(null);
 
   const [, setTick] = useState(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const battleReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bossReplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearBattleReplayTimer = useCallback(() => {
     if (battleReplayTimerRef.current) {
@@ -375,14 +490,37 @@ export default function DailyDungeonPage() {
     }
   }, []);
 
+  const clearToastTimer = useCallback(() => {
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+  }, []);
+
+  const pushToast = useCallback(
+    (nextToast: Omit<DungeonToast, "id">) => {
+      clearToastTimer();
+      setToast({
+        id: Date.now(),
+        ...nextToast,
+      });
+      toastTimerRef.current = setTimeout(() => {
+        setToast(null);
+        toastTimerRef.current = null;
+      }, 7000);
+    },
+    [clearToastTimer],
+  );
+
   useEffect(() => {
     tickRef.current = setInterval(() => setTick((t) => t + 1), 1000);
     return () => {
       if (tickRef.current) clearInterval(tickRef.current);
       clearBattleReplayTimer();
       clearBossReplayTimer();
+      clearToastTimer();
     };
-  }, [clearBattleReplayTimer, clearBossReplayTimer]);
+  }, [clearBattleReplayTimer, clearBossReplayTimer, clearToastTimer]);
 
   const map = useMemo(() => generateDailyMap(MAP_INPUT), []);
   const merkleTree = useMemo(() => buildLocationMerkleTree(map.locations), [map]);
@@ -390,7 +528,7 @@ export default function DailyDungeonPage() {
     inventory,
     layout,
     backpackSnapshot,
-    addItem,
+    addAndAutoPlaceItem,
     moveItem,
     rotateItem,
     autoPack,
@@ -414,6 +552,13 @@ export default function DailyDungeonPage() {
     }
     return cells;
   }, [map, poiByPos]);
+
+  const bossLocations = useMemo(
+    () => map.locations.filter((location) => location.kind === LocationKind.Boss),
+    [map.locations],
+  );
+  const primaryBossId = bossLocations[0]?.id ?? null;
+  const hasDeprecatedMultiBossMap = bossLocations.length > 1;
 
   const selectedBossShardIndex = useMemo(() => {
     if (!publicKey || !dailyDungeon?.bossShardCount) return null;
@@ -489,6 +634,10 @@ export default function DailyDungeonPage() {
             ? { spec, merkleProof, onChain, loading: false }
             : current,
         );
+        setPoiChainStates((current) => ({
+          ...current,
+          [spec.id]: onChain,
+        }));
         return onChain;
       } catch (error) {
         setSelectedPoi((current) =>
@@ -517,10 +666,32 @@ export default function DailyDungeonPage() {
     return loadPoiState(selectedPoi.spec, selectedPoi.merkleProof);
   }, [selectedPoi, loadPoiState]);
 
+  const refreshMapPoiStates = useCallback(async () => {
+    const entries = await Promise.all(
+      map.locations.map(async (spec) => {
+        try {
+          const onChain = await fetchPoiOnChainState(
+            program,
+            map.dayId,
+            spec,
+            publicKey ?? undefined,
+          );
+          return [spec.id, onChain] as const;
+        } catch {
+          return [spec.id, null] as const;
+        }
+      }),
+    );
+
+    setPoiChainStates(
+      Object.fromEntries(entries.filter((entry): entry is readonly [string, PoiOnChainState] => entry[1] !== null)),
+    );
+  }, [map.dayId, map.locations, program, publicKey, publicKeyString]);
+
   const refreshAfterTx = useCallback(async () => {
-    await Promise.all([refreshDailyDungeon(), refreshPlayerRun()]);
+    await Promise.all([refreshDailyDungeon(), refreshPlayerRun(), refreshMapPoiStates()]);
     await refreshSelectedPoiState();
-  }, [refreshDailyDungeon, refreshPlayerRun, refreshSelectedPoiState]);
+  }, [refreshDailyDungeon, refreshMapPoiStates, refreshPlayerRun, refreshSelectedPoiState]);
 
   useEffect(() => {
     void refreshDailyDungeon();
@@ -529,6 +700,10 @@ export default function DailyDungeonPage() {
   useEffect(() => {
     void refreshPlayerRun();
   }, [refreshPlayerRun]);
+
+  useEffect(() => {
+    void refreshMapPoiStates();
+  }, [refreshMapPoiStates]);
 
   useEffect(() => {
     if (battlePhase.phase !== "replaying") {
@@ -840,10 +1015,18 @@ export default function DailyDungeonPage() {
   }, [clearBattleReplayTimer]);
 
   const handleOpenBossOverlay = useCallback(() => {
+    if (selectedPoi?.spec.kind === LocationKind.Boss && selectedPoi.spec.id !== primaryBossId) {
+      setBossBattlePhase({
+        phase: "error",
+        message: "Deprecated map warning: only the first Boss POI can start a raid.",
+      });
+      return;
+    }
+
     clearBossReplayTimer();
     setBossBattlePhase({ phase: "idle" });
     setBattleOverlayTarget("boss");
-  }, [clearBossReplayTimer]);
+  }, [clearBossReplayTimer, primaryBossId, selectedPoi]);
 
   const handleCloseBattleOverlay = useCallback(() => {
     if (
@@ -918,21 +1101,33 @@ export default function DailyDungeonPage() {
           stockInfo.expectedPrice,
           player,
         );
-        addItem(
-          createBackpackItemFromShopSlot(
-            {
-              ...slot,
-              itemId: stockInfo.itemId ?? slot.itemId,
-              rewardTier: normalizeRewardTier(stockInfo.rewardTier, slot.rewardTier),
-            },
-            {
-              dayId: map.dayId,
-              player: player.toBase58(),
-              purchaseIndex: stockInfo.soldCount ?? slotIndex,
-              signature,
-            },
-          ),
+        const purchasedSlot = {
+          ...slot,
+          itemId: stockInfo.itemId ?? slot.itemId,
+          rewardTier: normalizeRewardTier(stockInfo.rewardTier, slot.rewardTier),
+        };
+        const sourceRef = shopPurchaseSourceRef(
+          map.dayId,
+          selectedPoi.spec.id,
+          slotIndex,
+          signature,
         );
+        const purchasedItem = createBackpackItemFromShopSlot(purchasedSlot, {
+          dayId: map.dayId,
+          player: player.toBase58(),
+          purchaseIndex: stockInfo.soldCount ?? slotIndex,
+          sourceRef,
+        });
+        const placement = addAndAutoPlaceItem(purchasedItem);
+        const definition = getBackpackItemDefinition(purchasedItem.definitionId);
+        pushToast({
+          title: `Bought ${definition.name}`,
+          message: placement.placed
+            ? "Added to backpack"
+            : "Added to inventory; no room in backpack.",
+          signature,
+          variant: placement.placed ? "success" : "warning",
+        });
         setShopActionPhase({ phase: "bought", slotIndex, signature });
         setTxSignature(signature);
         await refreshAfterTx();
@@ -944,7 +1139,15 @@ export default function DailyDungeonPage() {
         setTxPending(null);
       }
     },
-    [addItem, map.dayId, playerRun, refreshAfterTx, requireWallet, selectedPoi],
+    [
+      addAndAutoPlaceItem,
+      map.dayId,
+      playerRun,
+      pushToast,
+      refreshAfterTx,
+      requireWallet,
+      selectedPoi,
+    ],
   );
 
   const handleStartBossBattle = useCallback(() => {
@@ -955,6 +1158,9 @@ export default function DailyDungeonPage() {
       if (!publicKey) throw new Error("Connect wallet first.");
       if (!playerRun) throw new Error("Enter dungeon first.");
       if (!selectedPoi?.spec.boss) throw new Error("No boss selected.");
+      if (selectedPoi.spec.id !== primaryBossId) {
+        throw new Error("Deprecated map warning: only the first Boss POI can start a raid.");
+      }
 
       const onChain = selectedPoiState ?? selectedPoi.onChain;
       if (!onChain?.initialized) throw new Error("Initialize Location first.");
@@ -999,6 +1205,7 @@ export default function DailyDungeonPage() {
     merkleTree.root,
     playerRun,
     publicKey,
+    primaryBossId,
     selectedPoi,
     selectedPoiState,
     showBossBattleResult,
@@ -1006,6 +1213,13 @@ export default function DailyDungeonPage() {
 
   const handleInitBossShard = useCallback(async () => {
     if (!selectedPoi?.spec.boss || !selectedPoi.onChain?.initialized) return;
+    if (selectedPoi.spec.id !== primaryBossId) {
+      setBossBattlePhase({
+        phase: "error",
+        message: "Deprecated map warning: only the first Boss POI can initialize a shard.",
+      });
+      return;
+    }
     if (!dailyDungeon) {
       setBossBattlePhase({ phase: "error", message: "Daily dungeon account is not initialized." });
       return;
@@ -1033,10 +1247,17 @@ export default function DailyDungeonPage() {
     } finally {
       setTxPending(null);
     }
-  }, [dailyDungeon, map.dayId, refreshAfterTx, requireWallet, selectedPoi]);
+  }, [dailyDungeon, map.dayId, primaryBossId, refreshAfterTx, requireWallet, selectedPoi]);
 
   const handleSubmitBossDamage = useCallback(async () => {
     if (!selectedPoi?.spec.boss) return;
+    if (selectedPoi.spec.id !== primaryBossId) {
+      setBossBattlePhase({
+        phase: "error",
+        message: "Deprecated map warning: only the first Boss POI can submit damage.",
+      });
+      return;
+    }
     const onChain = selectedPoiState ?? selectedPoi.onChain;
     if (!onChain?.initialized) return;
     const bossBattle = bossBattlePhase;
@@ -1074,9 +1295,9 @@ export default function DailyDungeonPage() {
         bossBattle.result,
         dailyDungeon.bossShardCount,
       );
-      setBossBattlePhase({ phase: "success", damage, signature, result: bossBattle.result });
       setTxSignature(signature);
       await refreshAfterTx();
+      setBossBattlePhase({ phase: "success", damage, signature, result: bossBattle.result });
     } catch (error) {
       const message = formatError(error, "Failed to submit boss damage.");
       setBossBattlePhase({
@@ -1091,6 +1312,7 @@ export default function DailyDungeonPage() {
     bossBattlePhase,
     dailyDungeon,
     map.dayId,
+    primaryBossId,
     refreshAfterTx,
     requireWallet,
     selectedPoi,
@@ -1099,6 +1321,13 @@ export default function DailyDungeonPage() {
 
   const handleClaimBossNft = useCallback(async () => {
     if (!selectedPoi?.spec.boss || !selectedPoi.onChain?.initialized) return;
+    if (selectedPoi.spec.id !== primaryBossId) {
+      setBossNftClaimPhase({
+        phase: "error",
+        message: "Deprecated map warning: only the first Boss POI can claim a Boss NFT.",
+      });
+      return;
+    }
     setBossNftClaimPhase({ phase: "submitting" });
     setTxPending("claimBossNft");
     setTxSignature(null);
@@ -1124,7 +1353,7 @@ export default function DailyDungeonPage() {
     } finally {
       setTxPending(null);
     }
-  }, [map.dayId, refreshAfterTx, requireWallet, selectedPoi]);
+  }, [map.dayId, primaryBossId, refreshAfterTx, requireWallet, selectedPoi]);
 
   const handleClaimDailyReward = useCallback(async () => {
     setDailyRewardPhase({ phase: "submitting" });
@@ -1138,22 +1367,29 @@ export default function DailyDungeonPage() {
       const sourceRef = bytesToHex(poiIdHash);
       const signature = await claimDailyReward(signingProgram, map.dayId, player, poiIdHash);
       if (!hasItemSource("treasure", sourceRef)) {
-        addItem(
-          createBackpackItemFromTreasure(
-            {
-              id: selectedPoi.spec.id,
-              poiId: selectedPoi.spec.id,
-              poiIdHash: sourceRef,
-              rewardTier: selectedPoi.spec.rewardTier ?? RewardTier.Common,
-              sourceRef,
-            },
-            {
-              dayId: map.dayId,
-              player: player.toBase58(),
-              sourceRef,
-            },
-          ),
+        const treasureItem = createBackpackItemFromTreasure(
+          {
+            id: selectedPoi.spec.id,
+            poiId: selectedPoi.spec.id,
+            poiIdHash: sourceRef,
+            rewardTier: selectedPoi.spec.rewardTier ?? RewardTier.Common,
+            sourceRef,
+          },
+          {
+            dayId: map.dayId,
+            player: player.toBase58(),
+            sourceRef,
+          },
         );
+        const placement = addAndAutoPlaceItem(treasureItem);
+        pushToast({
+          title: "Claimed NFT + Backpack Item",
+          message: placement.placed
+            ? "Added to backpack"
+            : "Added to inventory; no room in backpack.",
+          signature,
+          variant: placement.placed ? "success" : "warning",
+        });
       }
       setDailyRewardPhase({ phase: "success", signature });
       setTxSignature(signature);
@@ -1168,7 +1404,66 @@ export default function DailyDungeonPage() {
     } finally {
       setTxPending(null);
     }
-  }, [addItem, hasItemSource, map.dayId, refreshAfterTx, requireWallet, selectedPoi]);
+  }, [
+    addAndAutoPlaceItem,
+    hasItemSource,
+    map.dayId,
+    pushToast,
+    refreshAfterTx,
+    requireWallet,
+    selectedPoi,
+  ]);
+
+  const handleRestoreTreasureItem = useCallback(() => {
+    if (!selectedPoi) return;
+
+    try {
+      if (!publicKeyString) throw new Error("Connect wallet first.");
+      const sourceRef = treasureSourceRef(selectedPoi.spec);
+      if (hasItemSource("treasure", sourceRef)) {
+        pushToast({
+          title: "Treasure backpack item already restored",
+          variant: "warning",
+        });
+        return;
+      }
+
+      const treasureItem = createBackpackItemFromTreasure(
+        {
+          id: selectedPoi.spec.id,
+          poiId: selectedPoi.spec.id,
+          poiIdHash: sourceRef,
+          rewardTier: selectedPoi.spec.rewardTier ?? RewardTier.Common,
+          sourceRef,
+        },
+        {
+          dayId: map.dayId,
+          player: publicKeyString,
+          sourceRef,
+        },
+      );
+      const placement = addAndAutoPlaceItem(treasureItem);
+      pushToast({
+        title: "Restored treasure backpack item locally.",
+        message: placement.placed
+          ? "Added to backpack"
+          : "Added to inventory; no room in backpack.",
+        variant: placement.placed ? "success" : "warning",
+      });
+    } catch (error) {
+      pushToast({
+        title: formatError(error, "Failed to restore treasure backpack item."),
+        variant: "error",
+      });
+    }
+  }, [
+    addAndAutoPlaceItem,
+    hasItemSource,
+    map.dayId,
+    publicKeyString,
+    pushToast,
+    selectedPoi,
+  ]);
 
   const dungeonStatus = dungeonLoading
     ? "Loading"
@@ -1178,11 +1473,30 @@ export default function DailyDungeonPage() {
   const rootMatches = !dailyDungeon || dailyDungeon.mapRoot === merkleTree.root;
   const selectedOnChain = selectedPoiState ?? selectedPoi?.onChain ?? null;
   const selectedEnemy = selectedPoi?.spec.kind === LocationKind.Enemy ? selectedPoi.spec.enemy : undefined;
-  const selectedBoss = selectedPoi?.spec.kind === LocationKind.Boss ? selectedPoi.spec.boss : undefined;
+  const selectedBoss =
+    selectedPoi?.spec.kind === LocationKind.Boss && selectedPoi.spec.id === primaryBossId
+      ? selectedPoi.spec.boss
+      : undefined;
+  const selectedBossShard =
+    selectedBossShardIndex === null
+      ? null
+      : selectedOnChain?.bossShards?.find((shard) => shard.index === selectedBossShardIndex) ?? null;
   const playerStats = playerRun
     ? computePlayerBattleStats(buildPlayerSnapshot(playerRun), backpackSnapshot)
     : undefined;
   const playerDisplayName = publicKeyString ? shortSignature(publicKeyString) : "Player";
+  const pendingBossDamage =
+    bossBattlePhase.phase === "result" || bossBattlePhase.phase === "success"
+      ? bossBattlePhase.damage
+      : 0;
+  const bossPlayerTotalDamageAfterSubmit =
+    bossBattlePhase.phase === "result"
+      ? (selectedOnChain?.playerBossDamage ?? playerRun?.bossDamage ?? 0) + pendingBossDamage
+      : bossBattlePhase.phase === "success"
+        ? selectedOnChain?.playerBossDamage ?? playerRun?.bossDamage
+        : undefined;
+  const bossNftEligibleAfterSubmit =
+    ((selectedOnChain?.playerContribution ?? 0) + pendingBossDamage) >= MINIMUM_BOSS_NFT_DAMAGE;
 
   return (
     <div className={styles.page}>
@@ -1224,11 +1538,22 @@ export default function DailyDungeonPage() {
         </div>
       </header>
 
-      {(chainError || dungeonError || !rootMatches || txSignature || enterPhase.phase === "error" || enterPhase.phase === "success") && (
+      {(chainError ||
+        dungeonError ||
+        !rootMatches ||
+        hasDeprecatedMultiBossMap ||
+        txSignature ||
+        enterPhase.phase === "error" ||
+        enterPhase.phase === "success") && (
         <div className={styles.statusBar}>
           {chainError && <span className={styles.statusError}>{chainError}</span>}
           {dungeonError && <span className={styles.statusError}>{dungeonError}</span>}
           {!rootMatches && <span className={styles.statusWarn}>Local map root differs from on-chain map root.</span>}
+          {hasDeprecatedMultiBossMap && (
+            <span className={styles.statusWarn}>
+              Deprecated map warning: multiple Boss POIs detected; only {shortId(primaryBossId ?? "unknown")} can raid.
+            </span>
+          )}
           {enterPhase.phase === "error" && <span className={styles.statusError}>{enterPhase.message}</span>}
           {enterPhase.phase === "success" && (
             <span className={styles.statusOk}>Entered: {shortSignature(enterPhase.signature)}</span>
@@ -1238,6 +1563,14 @@ export default function DailyDungeonPage() {
               Transaction confirmed: <TxExplorerLink signature={txSignature} />
             </span>
           )}
+        </div>
+      )}
+
+      {toast && (
+        <div className={`${styles.toast} ${styles[`toast_${toast.variant ?? "success"}`]}`}>
+          <strong>{toast.title}</strong>
+          {toast.message && <span>{toast.message}</span>}
+          {toast.signature && <span className={styles.toastSignature}>{shortSignature(toast.signature)}</span>}
         </div>
       )}
 
@@ -1266,20 +1599,45 @@ export default function DailyDungeonPage() {
               const spec = cell.poi;
               const isSelected = selectedPoi?.spec.id === spec.id;
               const isHovered = hoveredPoi?.id === spec.id;
-              const tileState = isSelected ? selectedPoiState ?? selectedPoi?.onChain ?? null : null;
+              const tileState = isSelected
+                ? selectedPoiState ?? selectedPoi?.onChain ?? poiChainStates[spec.id] ?? null
+                : poiChainStates[spec.id] ?? null;
               const tileLocked = spec.kind === LocationKind.Enemy && isOnCooldown(tileState);
+              const tileInitialized = tileState?.initialized ?? false;
+              const tileUninitialized = tileState !== null && !tileInitialized;
+              const tileClearedRecently =
+                spec.kind === LocationKind.Enemy && (tileState?.clearCount ?? 0) > 0 && !tileLocked;
+              const tileTreasureClaimed =
+                spec.kind === LocationKind.Treasure && tileState?.dailyRewardClaimed;
+              const tileDeprecatedBoss =
+                spec.kind === LocationKind.Boss && spec.id !== primaryBossId;
+              const shopStock = spec.kind === LocationKind.Shop ? shopTileStock(tileState) : null;
               return (
                 <button
                   key={`${cell.x}-${cell.y}`}
-                  className={`${styles.poi} ${isSelected ? styles.poiSelected : ""} ${isHovered ? styles.poiHovered : ""} ${tileLocked ? styles.poiLocked : ""}`}
+                  className={[
+                    styles.poi,
+                    isSelected ? styles.poiSelected : "",
+                    isHovered ? styles.poiHovered : "",
+                    tileInitialized ? styles.poiInitialized : "",
+                    tileUninitialized ? styles.poiUninitialized : "",
+                    tileLocked ? styles.poiLocked : "",
+                    tileClearedRecently ? styles.poiCleared : "",
+                    spec.kind === LocationKind.Boss ? styles.poiBoss : "",
+                    spec.kind === LocationKind.Shop ? styles.poiShop : "",
+                    tileTreasureClaimed ? styles.poiTreasureClaimed : "",
+                    tileDeprecatedBoss ? styles.poiDeprecated : "",
+                  ].join(" ")}
                   style={{ borderColor: POI_COLORS[spec.kind] }}
                   onClick={() => handlePoiClick(spec)}
                   onMouseEnter={() => setHoveredPoi(spec)}
                   onMouseLeave={() => setHoveredPoi(null)}
-                  title={`${spec.kind}: ${spec.id} (${cell.x}, ${cell.y})${tileLocked ? ` - Locked for ${formatCooldown(getCooldownSeconds(tileState))}` : ""}`}
+                  title={`${spec.kind}: ${spec.id} (${cell.x}, ${cell.y})${tileLocked ? ` - Locked for ${formatCooldown(getCooldownSeconds(tileState))}` : ""}${tileDeprecatedBoss ? " - Deprecated Boss POI" : ""}`}
                 >
                   <span className={styles.poiIcon}>{POI_ICONS[spec.kind]}</span>
                   {tileLocked && <span className={styles.poiLock} aria-hidden="true">🔒</span>}
+                  {shopStock && <span className={styles.poiCornerBadge}>{shopStock}</span>}
+                  {tileTreasureClaimed && <span className={styles.poiCheck} aria-hidden="true">✓</span>}
                 </button>
               );
             })}
@@ -1294,6 +1652,7 @@ export default function DailyDungeonPage() {
                 onChain: selectedPoiState ?? selectedPoi.onChain,
                 loading: selectedPoi.loading || (loadingChainState && !selectedPoiState),
               }}
+              dayId={map.dayId}
               dailyDungeon={dailyDungeon}
               merkleRoot={merkleTree.root}
               onInitLocation={handleInitLocation}
@@ -1319,8 +1678,13 @@ export default function DailyDungeonPage() {
               onSubmitBossDamage={handleSubmitBossDamage}
               dailyRewardPhase={dailyRewardPhase}
               onClaimDailyReward={handleClaimDailyReward}
+              onRestoreTreasureItem={handleRestoreTreasureItem}
+              hasItemSource={hasItemSource}
+              playerPubkey={publicKeyString}
               bossNftClaimPhase={bossNftClaimPhase}
               onClaimBossNft={handleClaimBossNft}
+              primaryBossId={primaryBossId}
+              hasDeprecatedMultiBossMap={hasDeprecatedMultiBossMap}
             />
           ) : (
             <div className={styles.emptyState}>
@@ -1345,6 +1709,12 @@ export default function DailyDungeonPage() {
           cooldownSeconds={isOnCooldown(selectedOnChain) ? getCooldownSeconds(selectedOnChain) : 0}
           energyCost={ENEMY_CLEAR_ENERGY_COST}
           playerEnergy={playerRun?.energy}
+          startBlocked={
+            txPending !== null ||
+            !publicKey ||
+            !playerRun ||
+            !selectedOnChain?.initialized
+          }
           backpackLayout={layout}
           inventory={inventory}
           onClose={handleCloseBattleOverlay}
@@ -1356,6 +1726,9 @@ export default function DailyDungeonPage() {
           onAutoPack={autoPack}
           explorerUrl={explorerTxUrl}
           shortSignature={shortSignature}
+          bossShardIndex={selectedBossShardIndex ?? undefined}
+          bossPlayerTotalDamageAfterSubmit={bossPlayerTotalDamageAfterSubmit}
+          bossNftEligible={bossNftEligibleAfterSubmit}
         />
       )}
 
@@ -1363,13 +1736,20 @@ export default function DailyDungeonPage() {
         <BattleOverlay
           open={battleOverlayTarget === "boss"}
           encounterKind="boss"
-          title={`Raid: ${selectedOnChain?.bossName ?? selectedBoss.name}`}
+          title="Boss Raid"
           enemyName={selectedOnChain?.bossName ?? selectedBoss.name}
           enemyLevel={selectedBoss.level}
           playerName={playerDisplayName}
           phase={toBossOverlayPhase(bossBattlePhase)}
           playerStats={playerStats}
           enemyStats={buildBossCombatantStats(selectedBoss, selectedOnChain)}
+          startBlocked={
+            txPending !== null ||
+            !publicKey ||
+            !playerRun ||
+            !selectedOnChain?.initialized ||
+            !selectedBossShard?.initialized
+          }
           backpackLayout={layout}
           inventory={inventory}
           onClose={handleCloseBattleOverlay}
@@ -1389,6 +1769,7 @@ export default function DailyDungeonPage() {
 
 function PoiDetailPanel({
   detail,
+  dayId,
   dailyDungeon,
   merkleRoot,
   onInitLocation,
@@ -1414,10 +1795,16 @@ function PoiDetailPanel({
   onSubmitBossDamage,
   dailyRewardPhase,
   onClaimDailyReward,
+  onRestoreTreasureItem,
+  hasItemSource,
+  playerPubkey,
   bossNftClaimPhase,
   onClaimBossNft,
+  primaryBossId,
+  hasDeprecatedMultiBossMap,
 }: {
   readonly detail: PoiDetail;
+  readonly dayId: string;
   readonly dailyDungeon: DailyDungeonState | null;
   readonly merkleRoot: string;
   readonly onInitLocation: () => void;
@@ -1443,42 +1830,60 @@ function PoiDetailPanel({
   readonly onSubmitBossDamage: () => void;
   readonly dailyRewardPhase: TxPhase;
   readonly onClaimDailyReward: () => void;
+  readonly onRestoreTreasureItem: () => void;
+  readonly hasItemSource: (sourceKind: "treasure", sourceRef: string) => boolean;
+  readonly playerPubkey: string | null;
   readonly bossNftClaimPhase: TxPhase;
   readonly onClaimBossNft: () => void;
+  readonly primaryBossId: string | null;
+  readonly hasDeprecatedMultiBossMap: boolean;
 }) {
   const { spec, onChain, merkleProof } = detail;
   const initialized = onChain?.initialized ?? false;
+  const locationAddress = locationPdaLabel(dayId, spec);
+  const isPrimaryBoss = spec.kind !== LocationKind.Boss || spec.id === primaryBossId;
 
   return (
     <div className={styles.detailPanel}>
-      <h2 className={styles.detailTitle}>
-        {POI_ICONS[spec.kind]} {spec.kind}
-      </h2>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>ID</span>
-        <span className={styles.metaValue}>{spec.id}</span>
-      </div>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Position</span>
-        <span className={styles.metaValue}>
-          ({spec.position.x}, {spec.position.y})
+      <div className={styles.poiHeader}>
+        <span className={styles.poiHeaderIcon}>{POI_ICONS[spec.kind]}</span>
+        <div className={styles.poiHeaderText}>
+          <h2 className={styles.detailTitle}>{spec.kind}</h2>
+          <span className={styles.poiHeaderMeta}>
+            ({spec.position.x}, {spec.position.y}) · {shortId(spec.id)}
+          </span>
+        </div>
+        <span className={initialized ? styles.badgeOk : styles.badgeWarn}>
+          {detail.loading || loadingChainState ? "Loading" : initialized ? "Initialized" : "Missing"}
         </span>
-      </div>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Config Hash</span>
-        <span className={styles.metaValue} style={{ fontSize: 11 }}>
-          {spec.baseConfigHash.slice(0, 16)}...
-        </span>
-      </div>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>On-chain</span>
-        <span className={styles.metaValue}>{detail.loading || loadingChainState ? "Loading" : initialized ? "Initialized" : "Missing"}</span>
       </div>
 
       {detail.error && <div className={styles.battleError}>❌ {detail.error}</div>}
 
+      {hasDeprecatedMultiBossMap && spec.kind === LocationKind.Boss && !isPrimaryBoss && (
+        <div className={styles.deprecatedWarning}>
+          Deprecated map warning: this extra Boss POI is disabled. Only the first Boss can raid.
+        </div>
+      )}
+
+      <div className={styles.detailCard}>
+        <h3 className={styles.sectionTitle}>Chain State</h3>
+        <div className={styles.detailMeta}>
+          <span className={styles.metaLabel}>Initialized</span>
+          <span className={styles.metaValue}>{initialized ? "Yes" : "No"}</span>
+        </div>
+        <div className={styles.detailMeta}>
+          <span className={styles.metaLabel}>PDA</span>
+          <span className={styles.metaValue}>{locationAddress}</span>
+        </div>
+        <div className={styles.detailMeta}>
+          <span className={styles.metaLabel}>Hash</span>
+          <span className={styles.metaValue}>{onChain?.location?.baseConfigHash ?? spec.baseConfigHash}</span>
+        </div>
+      </div>
+
       {!detail.loading && !initialized && (
-        <div className={styles.detailSection}>
+        <div className={styles.detailCard}>
           <p className={styles.hint}>This POI account is not initialized on-chain.</p>
           {ENABLE_MANUAL_POI_INIT ? (
             <>
@@ -1567,28 +1972,32 @@ function PoiDetailPanel({
           selectedBossShardIndex={selectedBossShardIndex}
           bossNftClaimPhase={bossNftClaimPhase}
           onClaimBossNft={onClaimBossNft}
+          playerRun={playerRun}
+          raidEnabled={isPrimaryBoss}
         />
       )}
 
       {initialized && walletConnected && hasPlayerRun && spec.kind === LocationKind.Treasure && (
         <TreasureContent
           spec={spec}
+          dayId={dayId}
+          playerPubkey={playerPubkey}
           onChain={onChain}
           dailyRewardPhase={dailyRewardPhase}
           onClaimDailyReward={onClaimDailyReward}
+          onRestoreTreasureItem={onRestoreTreasureItem}
+          hasBackpackItem={hasItemSource("treasure", treasureSourceRef(spec))}
           walletConnected={walletConnected}
           hasPlayerRun={hasPlayerRun}
           txPending={txPending}
         />
       )}
 
-      <div className={styles.detailSection}>
+      <div className={styles.detailCard}>
         <h3 className={styles.sectionTitle}>🔗 Merkle Proof</h3>
         <div className={styles.detailMeta}>
           <span className={styles.metaLabel}>Root</span>
-          <span className={styles.metaValue} style={{ fontSize: 11 }}>
-            {merkleRoot.slice(0, 16)}...
-          </span>
+          <span className={styles.metaValue}>{merkleRoot}</span>
         </div>
         <div className={styles.detailMeta}>
           <span className={styles.metaLabel}>Proof Steps</span>
@@ -1725,8 +2134,8 @@ function ShopContent({
   readonly txPending: TxPending;
 }) {
   return (
-    <div className={styles.detailSection}>
-      <h3 className={styles.sectionTitle}>🏪 Shop</h3>
+    <div className={styles.detailCard}>
+      <h3 className={styles.sectionTitle}>🛒 Shop</h3>
       <div className={styles.detailMeta}>
         <span className={styles.metaLabel}>Keeper</span>
         <span className={styles.metaValue}>{onChain?.keeperName || shop.keeperName || "Unknown"}</span>
@@ -1735,10 +2144,22 @@ function ShopContent({
         <span className={styles.metaLabel}>Slots</span>
         <span className={styles.metaValue}>{onChain?.slotCount ?? shop.itemSlots.length}</span>
       </div>
+      <p className={styles.mvpNotice}>
+        Backpack items are stored locally in this MVP; the purchase itself is on-chain.
+      </p>
 
       <h3 className={styles.sectionTitle}>Items</h3>
       {shop.itemSlots.map((slot, index) => {
         const stockInfo = onChain?.stock?.[index];
+        const previewSlot = {
+          ...slot,
+          itemId: stockInfo?.itemId ?? slot.itemId,
+          rewardTier: normalizeRewardTier(stockInfo?.rewardTier, slot.rewardTier),
+        };
+        const preview = previewBackpackItemFromShopSlot(previewSlot);
+        const definition = preview.definition;
+        const size = getItemSize(definition, false);
+        const hints = adjacencyHints(definition);
         const isInitializing =
           txPending === shopTxKey("initShopSlot", index) ||
           (shopActionPhase.phase === "initializingSlot" && shopActionPhase.slotIndex === index);
@@ -1749,14 +2170,37 @@ function ShopContent({
         const isSlotInitialized = shopActionPhase.phase === "slotInitialized" && shopActionPhase.slotIndex === index;
         const availableStock = stockInfo?.availableStock ?? stockInfo?.available ?? 0;
         const inStock = availableStock > 0;
+        const disabled = Boolean(stockInfo?.initialized && !inStock);
+        const price = stockInfo?.currentPrice ?? stockInfo?.price ?? slot.price;
 
         return (
-          <div key={slot.slotId} className={styles.shopSlot}>
-            <div className={styles.shopSlotHeader}>
-              <span className={styles.shopSlotName}>{stockInfo?.itemId ?? slot.itemId}</span>
-              <span className={styles.shopSlotTier} style={{ color: rewardTierColor(stockInfo?.rewardTier ?? slot.rewardTier) }}>
-                {stockInfo?.rewardTier ?? slot.rewardTier}
+          <div
+            key={slot.slotId}
+            className={`${styles.shopSlot} ${disabled ? styles.shopSlotDisabled : ""}`}
+            aria-disabled={disabled}
+          >
+            <div className={styles.shopCardHeader}>
+              <span className={styles.shopItemIcon} aria-hidden="true">
+                {itemIcon(definition)}
               </span>
+              <div className={styles.shopItemTitle}>
+                <span className={styles.shopSlotName}>{definition.name}</span>
+                <span className={styles.shopItemSubline}>
+                  {definition.kind} · {size.width}x{size.height}
+                </span>
+              </div>
+              <span
+                className={styles.shopSlotTier}
+                style={{ color: rewardTierColor(definition.tier) }}
+              >
+                {definition.tier}
+              </span>
+            </div>
+            <p className={styles.shopEffectSummary}>{itemEffectSummary(definition)}</p>
+            <div className={styles.adjacencyHint}>
+              {hints.map((hint) => (
+                <span key={hint}>{hint}</span>
+              ))}
             </div>
             {!stockInfo?.initialized ? (
               <>
@@ -1771,25 +2215,15 @@ function ShopContent({
               </>
             ) : (
               <>
-                <div className={styles.detailMeta}>
-                  <span className={styles.metaLabel}>Base Price</span>
-                  <span className={styles.metaValue}>{stockInfo.basePrice} pts</span>
-                </div>
-                <div className={styles.detailMeta}>
-                  <span className={styles.metaLabel}>Current Price</span>
-                  <span className={styles.metaValue}>{stockInfo.currentPrice} pts</span>
-                </div>
-                <div className={styles.detailMeta}>
-                  <span className={styles.metaLabel}>Available</span>
-                  <span className={styles.metaValue}>{availableStock}</span>
-                </div>
-                <div className={styles.detailMeta}>
-                  <span className={styles.metaLabel}>Sold</span>
-                  <span className={styles.metaValue}>{stockInfo.soldCount}</span>
+                <div className={styles.shopStatsGrid}>
+                  <ShopCardStat label="Price" value={`${price} pts`} />
+                  <ShopCardStat label="Stock" value={shopStockLabel(stockInfo, slot.stock)} />
+                  <ShopCardStat label="Sold" value={stockInfo.soldCount ?? 0} />
+                  <ShopCardStat label="Restock" value={shopRestockInfo(stockInfo)} />
                 </div>
                 <div className={styles.detailMeta}>
                   <span className={styles.metaLabel}>Wallet Limit</span>
-                  <span className={styles.metaValue}>{stockInfo.perWalletDailyLimit}</span>
+                  <span className={styles.metaValue}>{stockInfo.perWalletDailyLimit ?? "-"}</span>
                 </div>
                 {isBought ? (
                   <div className={styles.initialized}>Purchased: <TxExplorerLink signature={shopActionPhase.signature} /></div>
@@ -1800,13 +2234,13 @@ function ShopContent({
                   </div>
                 ) : walletConnected && hasPlayerRun && inStock ? (
                   <button className={styles.btnClear} onClick={() => onBuyItem(index)} disabled={txPending !== null} style={{ marginTop: 6 }}>
-                    Buy Item ({stockInfo.currentPrice} pts)
+                    Buy
                   </button>
                 ) : walletConnected && !hasPlayerRun ? (
                   <p className={styles.hint}>Enter dungeon before buying items.</p>
                 ) : !inStock ? (
                   <button className={styles.btnSecondary} disabled style={{ marginTop: 6 }}>
-                    Sold Out
+                    Sold out
                   </button>
                 ) : (
                   <p className={styles.hint}>Connect wallet to buy.</p>
@@ -1826,6 +2260,21 @@ function ShopContent({
   );
 }
 
+function ShopCardStat({
+  label,
+  value,
+}: {
+  readonly label: string;
+  readonly value: string | number;
+}) {
+  return (
+    <div className={styles.shopCardStat}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 function BossContent({
   boss,
   onChain,
@@ -1839,6 +2288,8 @@ function BossContent({
   selectedBossShardIndex,
   bossNftClaimPhase,
   onClaimBossNft,
+  playerRun,
+  raidEnabled,
 }: {
   readonly boss: NonNullable<DailyLocationSpec["boss"]>;
   readonly onChain: PoiOnChainState | null;
@@ -1852,47 +2303,63 @@ function BossContent({
   readonly selectedBossShardIndex: number | null;
   readonly bossNftClaimPhase: TxPhase;
   readonly onClaimBossNft: () => void;
+  readonly playerRun: PlayerRunState | null;
+  readonly raidEnabled: boolean;
 }) {
   const totalBossDamage = onChain?.totalDamage ?? 0;
   const bossHp = onChain?.bossHp ?? boss.maxHealth;
   const bossDefeated = onChain?.bossDefeated ?? totalBossDamage >= bossHp;
+  const bossHpPercent = bossHp > 0 ? Math.min(100, (totalBossDamage / bossHp) * 100) : 0;
   const requiredShard =
     selectedBossShardIndex === null
       ? null
       : onChain?.bossShards?.find((shard) => shard.index === selectedBossShardIndex) ?? null;
-  const hasContribution = (onChain?.playerContribution ?? 0) > 0;
+  const playerContribution = onChain?.playerContribution ?? 0;
+  const playerTotalDamage = onChain?.playerBossDamage ?? playerRun?.bossDamage ?? 0;
+  const currentShardDamage = requiredShard?.totalDamage ?? 0;
+  const hasMinimumContribution = playerContribution >= MINIMUM_BOSS_NFT_DAMAGE;
+  const canClaimBossNft = raidEnabled && !onChain?.bossNftClaimed && hasMinimumContribution;
+  const lastDamage =
+    bossBattlePhase.phase === "result" || bossBattlePhase.phase === "success"
+      ? bossBattlePhase.damage
+      : null;
 
   return (
-    <div className={styles.detailSection}>
-      <h3 className={styles.sectionTitle}>👹 Boss: {onChain?.bossName ?? boss.name}</h3>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Level</span>
-        <span className={styles.metaValue}>{boss.level}</span>
+    <div className={`${styles.detailCard} ${styles.bossCard}`}>
+      <div className={styles.bossHeader}>
+        <div>
+          <h3 className={styles.sectionTitle}>👑 {onChain?.bossName ?? boss.name}</h3>
+          <p className={styles.bossSubtitle}>Reward tier {boss.rewardTier}</p>
+        </div>
+        <span className={onChain?.bossNftClaimed ? styles.badgeOk : styles.badgeWarn}>
+          {onChain?.bossNftClaimed ? "NFT claimed" : "NFT not claimed"}
+        </span>
       </div>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Boss HP</span>
-        <span className={styles.metaValue}>{bossHp}</span>
-      </div>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Base Damage</span>
-        <span className={styles.metaValue}>{onChain?.baseDamage ?? boss.attack}</span>
-      </div>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Player Damage</span>
-        <span className={styles.metaValue}>{onChain?.playerContribution ?? 0}</span>
-      </div>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Run Boss Damage</span>
-        <span className={styles.metaValue}>{onChain?.playerBossDamage ?? 0}</span>
+
+      {!raidEnabled && (
+        <div className={styles.deprecatedWarning}>
+          Deprecated map warning: only the first Boss POI can start raids, submit damage, or claim the Boss NFT.
+        </div>
+      )}
+
+      <div className={styles.bossStatGrid}>
+        <ShopCardStat label="Boss name" value={onChain?.bossName ?? boss.name} />
+        <ShopCardStat label="Boss level" value={boss.level} />
+        <ShopCardStat label="Boss HP" value={bossHp} />
+        <ShopCardStat label="Reward tier" value={boss.rewardTier} />
+        <ShopCardStat label="Shard count" value={onChain?.bossShards?.length ?? "-"} />
+        <ShopCardStat label="Player shard" value={selectedBossShardIndex ?? "-"} />
+        <ShopCardStat label="Shard damage" value={currentShardDamage} />
+        <ShopCardStat label="Player total" value={playerTotalDamage} />
       </div>
 
       <div className={styles.bossShards}>
-        <h4 className={styles.sectionTitle}>Boss HP Progress</h4>
+        <h4 className={styles.sectionTitle}>Boss HP</h4>
         <div className={styles.bossHpBar}>
           <div
             className={styles.bossHpFill}
             style={{
-              width: `${Math.min(100, (totalBossDamage / bossHp) * 100)}%`,
+              width: `${bossHpPercent}%`,
               background: bossDefeated ? "#2ecc71" : "#e74c3c",
             }}
           />
@@ -1910,7 +2377,10 @@ function BossContent({
         </div>
         <h4 className={styles.sectionTitle}>Shard Progress</h4>
         {(onChain?.bossShards ?? []).map((shard) => (
-          <div key={shard.index} className={styles.detailMeta}>
+          <div
+            key={shard.index}
+            className={`${styles.shardRow} ${shard.index === selectedBossShardIndex ? styles.shardRowActive : ""}`}
+          >
             <span className={styles.metaLabel}>Shard #{shard.index}</span>
             <span className={styles.metaValue}>
               {shard.initialized ? `${shard.totalDamage} dmg (${shard.participantCount} players)` : "Missing"}
@@ -1925,17 +2395,21 @@ function BossContent({
         <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
           Enter Dungeon
         </button>
+      ) : !raidEnabled ? (
+        <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
+          Deprecated Boss POI
+        </button>
       ) : selectedBossShardIndex === null ? (
         <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
           Boss Shard Unavailable
         </button>
       ) : !requiredShard?.initialized ? (
         <button className={styles.btnInit} onClick={onInitBossShard} disabled={txPending !== null} style={{ marginTop: 8 }}>
-          {txPending === "initBossShard" ? "Initializing Boss Shard..." : "Initialize Boss Shard"}
+          {txPending === "initBossShard" ? "Initializing Boss Shard..." : "Init Boss Shard"}
         </button>
       ) : (
         <BattleArena
-          title="Boss Battle"
+          title="Boss Raid"
           encounterKind="boss"
           enemyName={onChain?.bossName ?? boss.name}
           phase={bossBattlePhase}
@@ -1949,9 +2423,29 @@ function BossContent({
         />
       )}
 
+      {lastDamage !== null && (
+        <div className={styles.raidReceipt}>
+          <span>Raid receipt</span>
+          <strong>Damage Score {lastDamage}</strong>
+          {bossBattlePhase.phase === "success" && (
+            <TxExplorerLink signature={bossBattlePhase.signature} />
+          )}
+        </div>
+      )}
+
+      <div className={styles.detailMeta}>
+        <span className={styles.metaLabel}>Claim Boss NFT eligibility</span>
+        <span className={styles.metaValue}>
+          {onChain?.bossNftClaimed
+            ? "Claimed"
+            : hasMinimumContribution
+              ? "Eligible"
+              : `Needs ${MINIMUM_BOSS_NFT_DAMAGE} damage`}
+        </span>
+      </div>
       {onChain?.bossNftClaimed && <div className={styles.initialized}>Claimed</div>}
-      {!onChain?.bossNftClaimed && hasContribution && bossNftClaimPhase.phase === "idle" && (
-        <button className={styles.btnInit} onClick={onClaimBossNft} disabled={txPending !== null} style={{ marginTop: 8 }}>
+      {!onChain?.bossNftClaimed && canClaimBossNft && bossNftClaimPhase.phase === "idle" && (
+        <button className={styles.btnBossClaim} onClick={onClaimBossNft} disabled={txPending !== null} style={{ marginTop: 8 }}>
           Claim Boss NFT
         </button>
       )}
@@ -1971,59 +2465,128 @@ function BossContent({
 
 function TreasureContent({
   spec,
+  dayId,
+  playerPubkey,
   onChain,
   dailyRewardPhase,
   onClaimDailyReward,
+  onRestoreTreasureItem,
+  hasBackpackItem,
   walletConnected,
   hasPlayerRun,
   txPending,
 }: {
   readonly spec: DailyLocationSpec;
+  readonly dayId: string;
+  readonly playerPubkey: string | null;
   readonly onChain: PoiOnChainState | null;
   readonly dailyRewardPhase: TxPhase;
   readonly onClaimDailyReward: () => void;
+  readonly onRestoreTreasureItem: () => void;
+  readonly hasBackpackItem: boolean;
   readonly walletConnected: boolean;
   readonly hasPlayerRun: boolean;
   readonly txPending: TxPending;
 }) {
   const tier = spec.rewardTier ?? RewardTier.Common;
+  const sourceRef = treasureSourceRef(spec);
+  const previewItem = playerPubkey
+    ? createBackpackItemFromTreasure(
+        {
+          id: spec.id,
+          poiId: spec.id,
+          poiIdHash: sourceRef,
+          rewardTier: tier,
+          sourceRef,
+        },
+        {
+          dayId,
+          player: playerPubkey,
+          sourceRef,
+        },
+      )
+    : null;
+  const previewDefinition = previewItem
+    ? getBackpackItemDefinition(previewItem.definitionId)
+    : getBackpackItemDefinition("ruby-common");
+  const previewSize = getItemSize(previewDefinition, false);
+  const canRestore = Boolean(onChain?.dailyRewardClaimed && !hasBackpackItem);
 
   return (
-    <div className={styles.detailSection}>
-      <h3 className={styles.sectionTitle}>💎 Daily Reward</h3>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Treasure Tier</span>
-        <span className={styles.metaValue} style={{ color: rewardTierColor(tier) }}>
-          {tier}
-        </span>
-      </div>
-      <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Reward Scope</span>
-        <span className={styles.metaValue}>Daily run</span>
+    <div className={styles.treasureStack}>
+      <div className={styles.detailCard}>
+        <h3 className={styles.sectionTitle}>Chain Reward / NFT Claim</h3>
+        <p className={styles.mvpNotice}>
+          NFT reward is chain-recorded. Backpack item is local MVP inventory.
+        </p>
+        <div className={styles.detailMeta}>
+          <span className={styles.metaLabel}>Reward Tier</span>
+          <span className={styles.metaValue} style={{ color: rewardTierColor(tier) }}>
+            {tier}
+          </span>
+        </div>
+        <div className={styles.detailMeta}>
+          <span className={styles.metaLabel}>Claimed</span>
+          <span className={styles.metaValue}>{onChain?.dailyRewardClaimed ? "Yes" : "No"}</span>
+        </div>
+        <div className={styles.detailMeta}>
+          <span className={styles.metaLabel}>NFT / cNFT</span>
+          <span className={styles.metaValue}>Daily reward claim record</span>
+        </div>
+        {dailyRewardPhase.phase === "success" && (
+          <div className={styles.initialized}>tx signature: <TxExplorerLink signature={dailyRewardPhase.signature} /></div>
+        )}
+
+        {onChain?.dailyRewardClaimed ? (
+          <div className={styles.initialized}>Claimed</div>
+        ) : !walletConnected ? (
+          <ConnectWalletAction />
+        ) : !hasPlayerRun ? (
+          <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
+            Enter Dungeon
+          </button>
+        ) : dailyRewardPhase.phase === "idle" ? (
+          <button className={styles.btnClear} onClick={onClaimDailyReward} disabled={txPending !== null} style={{ marginTop: 8 }}>
+            Claim NFT + Backpack Item
+          </button>
+        ) : dailyRewardPhase.phase === "submitting" ? (
+          <div className={styles.battleSimulating}>
+            <div className={styles.spinner} />
+            <span>Claiming daily reward...</span>
+          </div>
+        ) : dailyRewardPhase.phase === "error" ? (
+          <div className={styles.battleError}>❌ {dailyRewardPhase.message}</div>
+        ) : null}
       </div>
 
-      {onChain?.dailyRewardClaimed ? (
-        <div className={styles.initialized}>Claimed</div>
-      ) : !walletConnected ? (
-        <ConnectWalletAction />
-      ) : !hasPlayerRun ? (
-        <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
-          Enter Dungeon
-        </button>
-      ) : dailyRewardPhase.phase === "idle" ? (
-        <button className={styles.btnClear} onClick={onClaimDailyReward} disabled={txPending !== null} style={{ marginTop: 8 }}>
-          Claim Daily Reward
-        </button>
-      ) : dailyRewardPhase.phase === "submitting" ? (
-        <div className={styles.battleSimulating}>
-          <div className={styles.spinner} />
-          <span>Claiming daily reward...</span>
+      <div className={styles.detailCard}>
+        <h3 className={styles.sectionTitle}>Backpack Item Reward</h3>
+        <div className={styles.rewardPreviewCard}>
+          <span className={styles.shopItemIcon} aria-hidden="true">
+            {itemIcon(previewDefinition)}
+          </span>
+          <div className={styles.rewardPreviewBody}>
+            <strong>{previewDefinition.name}</strong>
+            <span>
+              {previewDefinition.tier} · {previewDefinition.kind} · {previewSize.width}x{previewSize.height}
+            </span>
+            <p>{itemEffectSummary(previewDefinition)}</p>
+          </div>
         </div>
-      ) : dailyRewardPhase.phase === "success" ? (
-        <div className={styles.initialized}>Claimed: <TxExplorerLink signature={dailyRewardPhase.signature} /></div>
-      ) : dailyRewardPhase.phase === "error" ? (
-        <div className={styles.battleError}>❌ {dailyRewardPhase.message}</div>
-      ) : null}
+        <div className={styles.detailMeta}>
+          <span className={styles.metaLabel}>SourceRef</span>
+          <span className={styles.metaValue}>{sourceRef}</span>
+        </div>
+        <div className={styles.detailMeta}>
+          <span className={styles.metaLabel}>Added Locally</span>
+          <span className={styles.metaValue}>{hasBackpackItem ? "Yes" : "No"}</span>
+        </div>
+        {canRestore && (
+          <button className={styles.btnInit} onClick={onRestoreTreasureItem} disabled={txPending !== null} style={{ marginTop: 8 }}>
+            Restore Backpack Item
+          </button>
+        )}
+      </div>
     </div>
   );
 }

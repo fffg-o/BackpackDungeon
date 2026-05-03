@@ -2,11 +2,14 @@
 
 .page {
   min-height: 100vh;
-  background: #0a0c0e;
+  background:
+    linear-gradient(135deg, rgba(20, 12, 28, 0.86), rgba(4, 7, 8, 0.96) 42%, rgba(10, 24, 19, 0.92)),
+    #07090a;
   color: #e8eaed;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
 }
 
 /* ── Header ───────────────────────────────────────────────────────────────── */
@@ -16,8 +19,9 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px 24px;
-  background: #121416;
-  border-bottom: 1px solid #1e2226;
+  background: rgba(13, 15, 16, 0.82);
+  border-bottom: 1px solid rgba(126, 255, 196, 0.18);
+  box-shadow: 0 1px 0 rgba(160, 96, 255, 0.16);
   flex-wrap: wrap;
   gap: 12px;
 }
@@ -89,7 +93,7 @@
 }
 
 .btnPrimary {
-  background: #5865f2;
+  background: linear-gradient(135deg, #7d5cff, #28d7a1);
   color: #fff;
   border: none;
   padding: 8px 16px;
@@ -101,7 +105,7 @@
 }
 
 .btnPrimary:hover {
-  background: #4752c4;
+  filter: brightness(1.08);
 }
 
 .btnPrimary:disabled {
@@ -130,8 +134,8 @@
   display: flex;
   gap: 16px;
   padding: 10px 24px;
-  background: #0e1012;
-  border-bottom: 1px solid #1a1e22;
+  background: rgba(9, 12, 13, 0.72);
+  border-bottom: 1px solid rgba(126, 255, 196, 0.12);
   flex-wrap: wrap;
 }
 
@@ -155,8 +159,8 @@
   flex-wrap: wrap;
   gap: 10px;
   padding: 8px 24px;
-  background: #121416;
-  border-bottom: 1px solid #1e2226;
+  background: rgba(18, 20, 22, 0.9);
+  border-bottom: 1px solid rgba(126, 255, 196, 0.12);
   font-size: 12px;
 }
 
@@ -184,8 +188,9 @@
 .content {
   display: flex;
   flex: 1;
-  gap: 0;
+  gap: 18px;
   overflow: hidden;
+  padding: 18px;
 }
 
 /* ── Map Grid ─────────────────────────────────────────────────────────────── */
@@ -197,16 +202,21 @@
   display: flex;
   justify-content: center;
   align-items: flex-start;
+  background: rgba(11, 13, 15, 0.58);
+  border: 1px solid rgba(126, 255, 196, 0.14);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(146, 91, 255, 0.08), 0 18px 50px rgba(0, 0, 0, 0.28);
 }
 
 .grid {
   display: grid;
-  gap: 1px;
-  background: #1a1e22;
-  border: 1px solid #2a2e32;
-  border-radius: 4px;
+  gap: 2px;
+  background: #111719;
+  border: 1px solid rgba(126, 255, 196, 0.22);
+  border-radius: 8px;
   overflow: hidden;
   min-width: 300px;
+  box-shadow: 0 0 28px rgba(125, 92, 255, 0.12);
 }
 
 .cell {
@@ -218,14 +228,14 @@
 
 .poi {
   aspect-ratio: 1;
-  background: #1a1e22;
+  background: #171b1c;
   border: 1.5px solid transparent;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  transition: all 0.12s;
+  transition: transform 0.12s, background 0.12s, box-shadow 0.12s, border-color 0.12s;
   position: relative;
   min-width: 12px;
   min-height: 12px;
@@ -245,18 +255,79 @@
 .poiSelected {
   transform: scale(1.4);
   z-index: 4;
-  box-shadow: 0 0 16px rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 18px rgba(126, 255, 196, 0.34), 0 0 34px rgba(125, 92, 255, 0.2);
   background: #2a2e32;
+}
+
+.poiInitialized {
+  box-shadow: inset 0 0 0 1px rgba(47, 213, 159, 0.18);
+}
+
+.poiUninitialized {
+  opacity: 0.72;
+  border-style: dashed;
 }
 
 .poiLocked {
   background: #261515;
+  box-shadow: inset 0 0 0 1px rgba(231, 76, 60, 0.32);
+}
+
+.poiCleared {
+  background: #132019;
+}
+
+.poiBoss {
+  background: #25141d;
+  box-shadow: 0 0 16px rgba(240, 184, 79, 0.22), 0 0 32px rgba(125, 92, 255, 0.16);
+}
+
+.poiShop {
+  background: #1f1c10;
+}
+
+.poiTreasureClaimed {
+  background: #13211e;
+}
+
+.poiDeprecated {
+  filter: grayscale(0.75);
 }
 
 .poiIcon {
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1;
   pointer-events: none;
+}
+
+.poiCornerBadge,
+.poiCheck {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  min-height: 13px;
+  padding: 1px 3px;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.poiCornerBadge {
+  right: 1px;
+  top: 1px;
+  color: #07100d;
+  background: #7effc4;
+}
+
+.poiCheck {
+  left: 1px;
+  top: 1px;
+  color: #07100d;
+  background: #f0b84f;
 }
 
 .poiLock {
@@ -281,10 +352,12 @@
 .sidebar {
   width: 360px;
   min-width: 320px;
-  background: #0e1012;
-  border-left: 1px solid #1e2226;
+  background: rgba(10, 12, 14, 0.72);
+  border: 1px solid rgba(126, 255, 196, 0.14);
+  border-radius: 8px;
   overflow-y: auto;
   padding: 20px;
+  box-shadow: inset 0 0 0 1px rgba(146, 91, 255, 0.08), 0 18px 50px rgba(0, 0, 0, 0.28);
 }
 
 .emptyState {
@@ -315,6 +388,51 @@
   gap: 12px;
 }
 
+.poiHeader,
+.detailCard {
+  background: rgba(18, 22, 24, 0.72);
+  border: 1px solid rgba(126, 255, 196, 0.14);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(146, 91, 255, 0.08);
+}
+
+.poiHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+}
+
+.poiHeaderIcon {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #0d1112;
+  border: 1px solid rgba(126, 255, 196, 0.2);
+  border-radius: 8px;
+  font-size: 20px;
+}
+
+.poiHeaderText {
+  min-width: 0;
+}
+
+.poiHeaderMeta {
+  display: block;
+  margin-top: 2px;
+  color: #8fa0aa;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+.detailCard {
+  padding: 12px;
+}
+
 .detailTitle {
   margin: 0;
   font-size: 18px;
@@ -341,11 +459,51 @@
   font-family: monospace;
   color: #d0d4d8;
   text-align: right;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .detailSection {
   margin-top: 4px;
+}
+
+.badgeOk,
+.badgeWarn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.badgeOk {
+  color: #06110d;
+  background: #7effc4;
+}
+
+.badgeWarn {
+  color: #1a1205;
+  background: #f0b84f;
+}
+
+.mvpNotice {
+  margin: 6px 0 10px;
+  color: #9fb0b8;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.deprecatedWarning {
+  padding: 10px;
+  color: #f8d79a;
+  background: #221707;
+  border: 1px solid #7c5922;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .sectionTitle {
@@ -358,24 +516,50 @@
 /* ── Shop Slots ───────────────────────────────────────────────────────────── */
 
 .shopSlot {
-  background: #121416;
-  border: 1px solid #1e2226;
-  border-radius: 6px;
-  padding: 10px;
-  margin-bottom: 8px;
+  background: rgba(15, 19, 20, 0.86);
+  border: 1px solid rgba(126, 255, 196, 0.14);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
 }
 
-.shopSlotHeader {
-  display: flex;
-  justify-content: space-between;
+.shopSlotDisabled {
+  opacity: 0.62;
+  filter: grayscale(0.25);
+}
+
+.shopCardHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
   margin-bottom: 6px;
 }
 
+.shopItemIcon {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #f7f3e9;
+  background: #171d1f;
+  border: 1px solid rgba(240, 184, 79, 0.26);
+  border-radius: 8px;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.shopItemTitle {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
 .shopSlotName {
-  font-size: 13px;
-  font-weight: 600;
-  font-family: monospace;
+  font-size: 14px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
 }
 
 .shopSlotTier {
@@ -384,9 +568,84 @@
   padding: 2px 6px;
   border-radius: 4px;
   background: #1a1e22;
+  white-space: nowrap;
+}
+
+.shopItemSubline {
+  color: #8fa0aa;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.shopEffectSummary {
+  margin: 8px 0;
+  color: #d7e0e3;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.adjacencyHint {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+  color: #d5bbf5;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.shopStatsGrid,
+.bossStatGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.shopCardStat {
+  min-width: 0;
+  padding: 8px;
+  background: #0d1112;
+  border: 1px solid rgba(126, 255, 196, 0.12);
+  border-radius: 7px;
+}
+
+.shopCardStat span {
+  display: block;
+  color: #7f8c94;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.shopCardStat strong {
+  display: block;
+  margin-top: 3px;
+  color: #edf3f5;
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 /* ── Boss Shards ──────────────────────────────────────────────────────────── */
+
+.bossCard {
+  border-color: rgba(240, 184, 79, 0.32);
+  box-shadow: inset 0 0 0 1px rgba(125, 92, 255, 0.12), 0 0 30px rgba(240, 184, 79, 0.08);
+}
+
+.bossHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.bossSubtitle {
+  margin: 0;
+  color: #cbb783;
+  font-size: 12px;
+  font-weight: 800;
+}
 
 .bossShards {
   margin-top: 8px;
@@ -401,6 +660,11 @@
   border: 1px solid #1e2226;
   border-radius: 4px;
   margin-bottom: 4px;
+}
+
+.shardRowActive {
+  border-color: #f0b84f;
+  background: #211b10;
 }
 
 .shardLabel {
@@ -419,10 +683,10 @@
 
 .bossHpBar {
   width: 100%;
-  height: 20px;
+  height: 28px;
   background: #1a1e22;
-  border: 1px solid #2a2e32;
-  border-radius: 10px;
+  border: 1px solid rgba(240, 184, 79, 0.32);
+  border-radius: 999px;
   overflow: hidden;
   margin: 8px 0;
 }
@@ -434,13 +698,30 @@
   min-width: 4px;
 }
 
+.raidReceipt {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 10px;
+  color: #e9f8f1;
+  background: #0d1f17;
+  border: 1px solid #2f9d64;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.raidReceipt strong {
+  color: #7effc4;
+  font-size: 14px;
+}
+
 /* ── Actions ──────────────────────────────────────────────────────────────── */
 
 .btnInit {
   width: 100%;
-  background: #2ecc71;
-  color: #fff;
-  border: none;
+  background: linear-gradient(135deg, #27ae60, #28d7a1);
+  color: #06110d;
+  border: 1px solid rgba(126, 255, 196, 0.28);
   padding: 10px 16px;
   border-radius: 8px;
   font-size: 13px;
@@ -451,7 +732,19 @@
 }
 
 .btnInit:hover {
-  background: #27ae60;
+  filter: brightness(1.06);
+}
+
+.btnBossClaim {
+  width: 100%;
+  background: linear-gradient(135deg, #f0b84f, #7d5cff);
+  color: #120d08;
+  border: 1px solid rgba(240, 184, 79, 0.42);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
 }
 
 .hint {
@@ -756,9 +1049,9 @@
 
 .btnClear {
   width: 100%;
-  background: #2ecc71;
-  color: #fff;
-  border: none;
+  background: linear-gradient(135deg, #2ecc71, #28d7a1);
+  color: #06110d;
+  border: 1px solid rgba(126, 255, 196, 0.24);
   padding: 10px 16px;
   border-radius: 8px;
   font-size: 13px;
@@ -768,7 +1061,82 @@
 }
 
 .btnClear:hover {
-  background: #27ae60;
+  filter: brightness(1.06);
+}
+
+.treasureStack {
+  display: grid;
+  gap: 12px;
+}
+
+.rewardPreviewCard {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  background: #0d1112;
+  border: 1px solid rgba(126, 255, 196, 0.14);
+  border-radius: 8px;
+}
+
+.rewardPreviewBody {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.rewardPreviewBody strong {
+  color: #edf3f5;
+  font-size: 14px;
+}
+
+.rewardPreviewBody span,
+.rewardPreviewBody p {
+  margin: 0;
+  color: #9fb0b8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 120;
+  max-width: min(360px, calc(100vw - 36px));
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  color: #eef6f2;
+  background: #101516;
+  border: 1px solid rgba(126, 255, 196, 0.32);
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.42);
+  font-size: 13px;
+}
+
+.toast strong,
+.toast span {
+  overflow-wrap: anywhere;
+}
+
+.toast_success {
+  border-color: #2ecc71;
+}
+
+.toast_warning {
+  border-color: #f0b84f;
+}
+
+.toast_error {
+  border-color: #e74c3c;
+}
+
+.toastSignature {
+  color: #7effc4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
 }
 
 .defeatHint {
@@ -857,17 +1225,34 @@
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 
-@media (max-width: 768px) {
+@media (prefers-reduced-motion: reduce) {
+  .poi,
+  .poiHovered,
+  .poiSelected,
+  .bossHpFill,
+  .hpFill,
+  .spinner {
+    animation: none;
+    transition: none;
+  }
+
+  .poiHovered,
+  .poiSelected {
+    transform: none;
+  }
+}
+
+@media (max-width: 920px) {
   .content {
     flex-direction: column;
+    overflow: visible;
   }
 
   .sidebar {
     width: 100%;
     min-width: unset;
     border-left: none;
-    border-top: 1px solid #1e2226;
-    max-height: 50vh;
+    max-height: none;
   }
 
   .header {
@@ -878,5 +1263,36 @@
   .headerRight {
     width: 100%;
     justify-content: space-between;
+  }
+}
+
+@media (max-width: 640px) {
+  .content {
+    padding: 10px;
+  }
+
+  .mapContainer,
+  .sidebar {
+    padding: 12px;
+  }
+
+  .stats,
+  .headerRight {
+    flex-wrap: wrap;
+  }
+
+  .shopStatsGrid,
+  .bossStatGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .poiHeader {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .poiHeader .badgeOk,
+  .poiHeader .badgeWarn {
+    grid-column: 1 / -1;
+    width: fit-content;
   }
 }

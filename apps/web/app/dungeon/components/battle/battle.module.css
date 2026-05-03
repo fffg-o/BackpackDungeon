@@ -23,6 +23,23 @@
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
 }
 
+.bossDialog {
+  border-color: rgba(240, 184, 79, 0.38);
+  box-shadow: 0 30px 110px rgba(0, 0, 0, 0.62), 0 0 44px rgba(125, 92, 255, 0.16);
+}
+
+.bossDialog .header {
+  background:
+    linear-gradient(135deg, rgba(49, 21, 31, 0.96), rgba(17, 20, 22, 0.96));
+  border-bottom-color: rgba(240, 184, 79, 0.28);
+}
+
+.bossDialog .stagePanel {
+  background:
+    linear-gradient(180deg, rgba(240, 184, 79, 0.11), transparent 38%),
+    #111518;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -144,6 +161,11 @@
   padding: 12px;
 }
 
+.builderStack {
+  display: grid;
+  gap: 12px;
+}
+
 .setupActions {
   display: flex;
   gap: 8px;
@@ -180,7 +202,12 @@
   border-radius: 8px;
 }
 
+.gridShell {
+  min-width: 0;
+}
+
 .gridCell {
+  position: relative;
   min-width: 0;
   min-height: 34px;
   aspect-ratio: 1;
@@ -194,6 +221,49 @@
 .gridCellSelected {
   border-color: #d49a3a;
   background: #211b10;
+}
+
+.gridCellPreviewValid {
+  border-color: #4fb6cf;
+  background: #123039;
+  box-shadow: inset 0 0 0 1px rgba(79, 182, 207, 0.42);
+}
+
+.gridCellPreviewInvalid {
+  border-color: #d94d3c;
+  background: #321615;
+  box-shadow: inset 0 0 0 1px rgba(217, 77, 60, 0.45);
+}
+
+.cellCoordinate {
+  position: absolute;
+  left: 3px;
+  top: 2px;
+  opacity: 0;
+  color: #95a5a6;
+  font-size: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  pointer-events: none;
+}
+
+.gridCell:hover .cellCoordinate,
+.gridCell:focus-visible .cellCoordinate {
+  opacity: 1;
+}
+
+.backpackFeedback {
+  min-height: 24px;
+  padding: 6px 2px 0;
+  color: #9fb1bb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.placedGridItem {
+  z-index: 3;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
 }
 
 .placedItem {
@@ -243,6 +313,7 @@
 }
 
 .inventoryItem {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 6px;
@@ -265,6 +336,247 @@
 
 .inventoryItemPlaced {
   opacity: 0.78;
+}
+
+.itemTile {
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  overflow: visible;
+}
+
+.itemTileCompact {
+  width: 100%;
+  height: 100%;
+  align-content: stretch;
+  padding: 7px;
+}
+
+.itemTileIcon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #f7f3e9;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 1000;
+}
+
+.itemTileText {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.itemTileBadges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.placedBadge {
+  padding: 3px 5px;
+  color: #f1d188;
+  background: #241d11;
+  border: 1px solid #765724;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.itemKind_gem {
+  background: #291416;
+  border-color: #9d3c48;
+}
+
+.itemKind_weapon {
+  background: #1b2022;
+  border-color: #9a8f7b;
+}
+
+.itemKind_armor {
+  background: #171b1f;
+  border-color: #58646e;
+}
+
+.itemKind_potion {
+  background: #13251c;
+  border-color: #3e9a65;
+}
+
+.itemKind_bomb {
+  background: #2b1710;
+  border-color: #c85a32;
+}
+
+.itemKind_charm {
+  background: #211731;
+  border-color: #8d61c8;
+}
+
+.itemKind_ward {
+  background: #122335;
+  border-color: #4f8fcf;
+}
+
+.itemKind_food {
+  background: #2a2114;
+  border-color: #c28a3a;
+}
+
+.itemKind_key {
+  background: #292410;
+  border-color: #d3b145;
+}
+
+.inventoryDrawer {
+  display: grid;
+  gap: 12px;
+}
+
+.inventoryGroup {
+  min-width: 0;
+}
+
+.inventoryGroupTitle {
+  margin: 0 0 8px;
+  color: #dbe2e5;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.backpackWarning {
+  padding: 9px 10px;
+  color: #ffd2c8;
+  background: #241414;
+  border: 1px solid #7a3b33;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.itemTooltip {
+  position: absolute;
+  z-index: 20;
+  left: 10px;
+  top: calc(100% + 8px);
+  width: min(280px, 78vw);
+  display: none;
+  padding: 10px;
+  color: #dfe7ea;
+  background: #0d1114;
+  border: 1px solid #354149;
+  border-radius: 7px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.45);
+  text-align: left;
+}
+
+.inventoryItem:hover .itemTooltip,
+.inventoryItem:focus-visible .itemTooltip {
+  display: block;
+}
+
+.tooltipHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tooltipIcon {
+  min-width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #f3d58a;
+  background: #171d21;
+  border: 1px solid #38444c;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 1000;
+  text-transform: uppercase;
+}
+
+.tooltipMeta {
+  display: block;
+  margin-top: 2px;
+  color: #9aa7ae;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.tooltipGrid {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 5px 8px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+
+.tooltipGrid span {
+  color: #7f8c94;
+}
+
+.tooltipGrid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.itemEffectList,
+.adjacencyHintList {
+  margin: 8px 0 0;
+  padding-left: 16px;
+  color: #cbd6db;
+  font-size: 11px;
+}
+
+.adjacencyHintList {
+  color: #d5bbf5;
+}
+
+.statsPreview {
+  padding: 10px;
+  background: #0f1214;
+  border: 1px solid #263036;
+  border-radius: 7px;
+}
+
+.statsPreviewGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.previewStat {
+  min-width: 0;
+  padding: 7px 8px;
+  background: #151a1d;
+  border: 1px solid #293239;
+  border-radius: 6px;
+}
+
+.previewStat span {
+  display: block;
+  color: #8998a1;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.previewStat strong {
+  display: block;
+  margin-top: 3px;
+  color: #edf3f5;
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .stagePanel {
@@ -324,6 +636,16 @@
 
 .fighterActive {
   border-color: #f0b84f;
+}
+
+.itemGlow {
+  border-color: #8a62c6;
+  box-shadow: inset 0 0 0 1px rgba(240, 184, 79, 0.2), 0 0 26px rgba(138, 98, 198, 0.18);
+}
+
+.fighterItemGlow {
+  border-color: #f0b84f;
+  box-shadow: 0 0 0 2px rgba(138, 98, 198, 0.24), 0 0 24px rgba(240, 184, 79, 0.16);
 }
 
 .fighterAvatar {
@@ -415,10 +737,6 @@
 }
 
 .logEntry {
-  display: grid;
-  grid-template-columns: 42px 72px 1fr;
-  gap: 8px;
-  align-items: center;
   padding: 8px 0;
   border-bottom: 1px solid #222a2f;
   font-size: 12px;
@@ -426,6 +744,21 @@
 
 .logEntryActive {
   color: #f4d58f;
+}
+
+.logEntryCritical .logDamage {
+  color: #f0b84f;
+}
+
+.logEntryDodged .logDamage {
+  color: #95a8b8;
+}
+
+.logMain {
+  display: grid;
+  grid-template-columns: 38px 74px minmax(74px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
 }
 
 .logTurn {
@@ -443,15 +776,61 @@
   font-weight: 900;
 }
 
+.logActorBackpack {
+  color: #d5bbf5;
+  font-weight: 900;
+}
+
+.logAction {
+  min-width: 0;
+  color: #cfd8dd;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .logDamage {
   color: #dbe2e5;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.logBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 7px 0 0 38px;
+}
+
+.logItemTrigger {
+  max-width: 100%;
+  padding: 5px 7px;
+  color: #f2d68a;
+  background: #241733;
+  border: 1px solid #8a62c6;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.logItemTriggerActive {
+  color: #101315;
+  background: #f0b84f;
+  border-color: #f4d58f;
+  box-shadow: 0 0 0 2px rgba(213, 187, 245, 0.18);
 }
 
 .summary {
   padding: 12px;
   border-top: 1px solid #222a2f;
+}
+
+.receipt {
+  display: grid;
+  gap: 10px;
 }
 
 .resultGrid {
@@ -482,6 +861,116 @@
   color: #eef2f3;
   font-size: 17px;
   font-weight: 900;
+}
+
+.hashGrid {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.hashStat {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 8px;
+  align-items: center;
+  padding: 9px 10px;
+  background: #0f1214;
+  border: 1px solid #263036;
+  border-radius: 7px;
+}
+
+.hashStat .resultLabel {
+  grid-column: 1 / -1;
+}
+
+.hashValue {
+  min-width: 0;
+  color: #cfd8dd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.copyButton {
+  min-height: 26px;
+  padding: 4px 7px;
+  color: #dfe6e9;
+  background: #1b2226;
+  border: 1px solid #344048;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.receiptNotice {
+  margin: 0 0 10px;
+  color: #9fb0b8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.effectsSummary {
+  margin-top: 10px;
+  padding: 10px;
+  background: #0f1214;
+  border: 1px solid #263036;
+  border-radius: 7px;
+}
+
+.summaryTitle {
+  margin: 0 0 8px;
+  color: #f0b84f;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.emptySummaryText {
+  margin: 0;
+  color: #83919a;
+  font-size: 12px;
+}
+
+.effectReceiptList {
+  display: grid;
+  gap: 6px;
+}
+
+.effectReceiptItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
+  color: #d8e1e5;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.effectReceiptCount {
+  color: #f0b84f;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 900;
+}
+
+.receiptDetails {
+  margin: 10px 0;
+  color: #a9b7bf;
+  font-size: 12px;
+}
+
+.receiptDetails summary {
+  cursor: pointer;
+  color: #d5bbf5;
+  font-weight: 900;
+}
+
+.receiptDetails p {
+  margin: 8px 0 0;
+  line-height: 1.4;
 }
 
 .primaryButton,
@@ -545,6 +1034,17 @@
   word-break: break-all;
 }
 
+.successReceipt {
+  display: grid;
+  gap: 8px;
+}
+
+.explorerLink {
+  color: #9bd8ff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .spinner {
   width: 18px;
   height: 18px;
@@ -582,12 +1082,21 @@
 }
 
 .floatingCritical {
-  color: #ff735f;
+  color: #f0b84f;
 }
 
 .floatingDodge {
   color: #95a5a6;
   font-size: 18px;
+}
+
+.floatingHeal {
+  color: #68d391;
+}
+
+.floatingShield {
+  color: #76c7ff;
+  font-size: 20px;
 }
 
 @keyframes spin {
@@ -607,6 +1116,18 @@
   to {
     opacity: 0;
     transform: translateY(-34px) scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .floatingDamage {
+    animation: none;
+  }
+
+  .floatingDamage {
+    opacity: 1;
+    transform: none;
   }
 }
 
@@ -673,5 +1194,35 @@
 
   .fighter {
     min-height: 210px;
+  }
+
+  .logMain {
+    grid-template-columns: 34px 68px minmax(0, 1fr);
+  }
+
+  .logDamage {
+    grid-column: 3;
+    text-align: left;
+  }
+
+  .logBadges {
+    margin-left: 0;
+  }
+
+  .statsPreviewGrid,
+  .resultGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .content {
+    grid-template-columns: 1fr;
+  }
+
+  .setupPanel,
+  .stagePanel,
+  .sidePanel {
+    min-width: 0;
   }
 }

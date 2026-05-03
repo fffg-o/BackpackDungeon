@@ -4,15 +4,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BACKPACK_ITEM_DEFINITIONS,
   autoPackItems,
+  canPlaceItem,
   createBackpackSnapshot,
   createStarterBackpackItems,
   placeItem,
   removeItem as removeLayoutItem,
   rotatePlacedItem,
+  validateBackpackSnapshot,
   type BackpackItemInstanceV1,
   type BackpackItemSourceKind,
   type BackpackLayoutV1,
   type BackpackSnapshotV1,
+  type PlacedBackpackItemV1,
 } from "@backpack-dungeon/game-core";
 
 export interface BackpackSaveV1 {
@@ -29,13 +32,19 @@ export interface UseBackpackInventoryResult {
   readonly layout: BackpackLayoutV1;
   readonly backpackSnapshot: BackpackSnapshotV1;
   readonly addItem: (item: BackpackItemInstanceV1) => void;
+  readonly addAndAutoPlaceItem: (item: BackpackItemInstanceV1) => AddAndAutoPlaceResult;
   readonly addItems: (items: readonly BackpackItemInstanceV1[]) => void;
   readonly removeItem: (instanceId: string) => void;
-  readonly moveItem: (instanceId: string, x: number, y: number) => void;
+  readonly moveItem: (instanceId: string, x: number, y: number, rotated?: boolean) => void;
   readonly rotateItem: (instanceId: string) => void;
   readonly autoPack: () => void;
   readonly resetBackpack: () => void;
   readonly hasItemSource: (sourceKind: BackpackItemSourceKind, sourceRef: string) => boolean;
+}
+
+export interface AddAndAutoPlaceResult {
+  readonly added: boolean;
+  readonly placed: boolean;
 }
 
 const DEFAULT_BACKPACK_WIDTH = 6;
@@ -87,6 +96,36 @@ export function useBackpackInventory(
     [commitSave],
   );
 
+  const addAndAutoPlaceItem = useCallback(
+    (item: BackpackItemInstanceV1): AddAndAutoPlaceResult => {
+      const plannedInventory = appendUniqueItems(save.inventory, [item]);
+      const plannedAdded = plannedInventory !== save.inventory;
+      const plannedLayout = plannedAdded ? firstFitPlaceItem(save.layout, item) : save.layout;
+      const plannedResult: AddAndAutoPlaceResult = {
+        added: plannedAdded,
+        placed: plannedLayout !== save.layout,
+      };
+
+      commitSave((current) => {
+        const nextInventory = appendUniqueItems(current.inventory, [item]);
+        const added = nextInventory !== current.inventory;
+        if (!added) {
+          return current;
+        }
+
+        const nextLayout = firstFitPlaceItem(current.layout, item);
+        return {
+          ...current,
+          inventory: nextInventory,
+          layout: nextLayout,
+        };
+      });
+
+      return plannedResult;
+    },
+    [commitSave, save.inventory, save.layout],
+  );
+
   const addItems = useCallback(
     (items: readonly BackpackItemInstanceV1[]) => {
       commitSave((current) => {
@@ -110,7 +149,7 @@ export function useBackpackInventory(
   );
 
   const moveItem = useCallback(
-    (instanceId: string, x: number, y: number) => {
+    (instanceId: string, x: number, y: number, rotated?: boolean) => {
       commitSave((current) => {
         const placedItem = current.layout.placedItems.find((item) => item.instanceId === instanceId);
         const inventoryItem = current.inventory.find((item) => item.instanceId === instanceId);
@@ -126,7 +165,7 @@ export function useBackpackInventory(
                 instanceId,
               },
               { x, y },
-              placedItem?.rotated ?? false,
+              rotated ?? placedItem?.rotated ?? false,
               BACKPACK_ITEM_DEFINITIONS,
             ),
           };
@@ -194,6 +233,7 @@ export function useBackpackInventory(
     layout: save.layout,
     backpackSnapshot,
     addItem,
+    addAndAutoPlaceItem,
     addItems,
     removeItem,
     moveItem,
@@ -202,6 +242,45 @@ export function useBackpackInventory(
     resetBackpack,
     hasItemSource,
   };
+}
+
+function firstFitPlaceItem(
+  layout: BackpackLayoutV1,
+  item: BackpackItemInstanceV1,
+): BackpackLayoutV1 {
+  if (layout.placedItems.some((placedItem) => placedItem.instanceId === item.instanceId)) {
+    return layout;
+  }
+
+  const definition = BACKPACK_ITEM_DEFINITIONS.find(
+    (candidate) => candidate.id === item.definitionId,
+  );
+  if (!definition) return layout;
+
+  const rotations = definition.size.width === definition.size.height ? [false] : [false, true];
+
+  for (const rotated of rotations) {
+    for (let y = 0; y < layout.height; y += 1) {
+      for (let x = 0; x < layout.width; x += 1) {
+        const candidate: PlacedBackpackItemV1 = {
+          definitionId: item.definitionId,
+          instanceId: item.instanceId,
+          rotated,
+          x,
+          y,
+        };
+
+        if (canPlaceItem(layout, candidate, BACKPACK_ITEM_DEFINITIONS)) {
+          return {
+            ...layout,
+            placedItems: [...layout.placedItems, candidate],
+          };
+        }
+      }
+    }
+  }
+
+  return layout;
 }
 
 function appendUniqueItems(
@@ -362,12 +441,21 @@ function parseBackpackSave(value: unknown, dayId: string, player: string): Backp
   }
 
   const inventory = value.inventory.map(parseBackpackItemInstance);
+  const layout = value.layout;
+  validateBackpackSnapshot(
+    createBackpackSnapshot({
+      inventory,
+      itemDefinitions: BACKPACK_ITEM_DEFINITIONS,
+      layout,
+    }),
+  );
+
   return {
     version: 1,
     dayId,
     player,
     inventory,
-    layout: value.layout,
+    layout,
     updatedAt: value.updatedAt,
   };
 }

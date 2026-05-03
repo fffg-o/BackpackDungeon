@@ -20,7 +20,7 @@ export type BattleOverlayPhase =
   | { readonly phase: "replaying"; readonly result: BattleResultV1; readonly replayIndex: number }
   | { readonly phase: "result"; readonly result: BattleResultV1 }
   | { readonly phase: "submitting" }
-  | { readonly phase: "success"; readonly signature: string; readonly result: BattleResultV1 }
+  | { readonly phase: "success"; readonly signature: string; readonly result?: BattleResultV1 }
   | { readonly phase: "error"; readonly message: string };
 
 export interface BattleOverlayProps {
@@ -36,17 +36,21 @@ export interface BattleOverlayProps {
   readonly cooldownSeconds?: number;
   readonly energyCost?: number;
   readonly playerEnergy?: number;
+  readonly startBlocked?: boolean;
   readonly backpackLayout: BackpackLayoutV1;
   readonly inventory: readonly BackpackItemInstanceV1[];
   readonly onClose: () => void;
   readonly onStart: () => void;
   readonly onSubmit: () => void;
   readonly onRetry: () => void;
-  readonly onMoveItem: (instanceId: string, x: number, y: number) => void;
+  readonly onMoveItem: (instanceId: string, x: number, y: number, rotated?: boolean) => void;
   readonly onRotateItem: (instanceId: string) => void;
   readonly onAutoPack: () => void;
   readonly explorerUrl?: (signature: string) => string;
   readonly shortSignature?: (signature: string) => string;
+  readonly bossShardIndex?: number;
+  readonly bossPlayerTotalDamageAfterSubmit?: number;
+  readonly bossNftEligible?: boolean;
 }
 
 export function BattleOverlay({
@@ -62,6 +66,7 @@ export function BattleOverlay({
   cooldownSeconds = 0,
   energyCost,
   playerEnergy,
+  startBlocked = false,
   backpackLayout,
   inventory,
   onClose,
@@ -73,6 +78,9 @@ export function BattleOverlay({
   onAutoPack,
   explorerUrl,
   shortSignature,
+  bossShardIndex,
+  bossPlayerTotalDamageAfterSubmit,
+  bossNftEligible,
 }: BattleOverlayProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -82,7 +90,8 @@ export function BattleOverlay({
     energyCost !== undefined &&
     playerEnergy !== undefined &&
     playerEnergy < energyCost;
-  const startDisabled = phase.phase !== "setup" || cooldownSeconds > 0 || energyMissing;
+  const startDisabled =
+    phase.phase !== "setup" || startBlocked || cooldownSeconds > 0 || energyMissing;
   const startLabel = cooldownSeconds > 0
     ? `Cooldown ${formatCooldown(cooldownSeconds)}`
     : energyMissing
@@ -141,6 +150,7 @@ export function BattleOverlay({
       handleClose,
       phase,
       playerEnergy,
+      startBlocked,
       title,
     ]
   );
@@ -153,7 +163,7 @@ export function BattleOverlay({
     <div className={styles.backdrop} onMouseDown={(event) => handleBackdropMouseDown(event, handleClose)}>
       <div
         ref={dialogRef}
-        className={styles.dialog}
+        className={`${styles.dialog} ${encounterKind === "boss" ? styles.bossDialog : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="battle-overlay-title"
@@ -194,6 +204,9 @@ export function BattleOverlay({
               onRetry={onRetry}
               explorerUrl={explorerUrl}
               shortSignature={shortSignature}
+              bossShardIndex={bossShardIndex}
+              bossPlayerTotalDamageAfterSubmit={bossPlayerTotalDamageAfterSubmit}
+              bossNftEligible={bossNftEligible}
             />
           </aside>
         </div>

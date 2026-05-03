@@ -6,6 +6,7 @@ import type {
   BackpackItemInstanceV1
 } from "./backpack-items.js";
 import {
+  canPlaceItem,
   getItemSize,
   type BackpackDefinitionLookup,
   type BackpackLayoutV1,
@@ -47,14 +48,37 @@ export interface BackpackTriggeredEffectV1 {
   readonly stat?: BackpackStatKey;
 }
 
-const EMPTY_BONUSES: BackpackStatBonusesV1 = Object.freeze({
-  attack: 0,
-  critBps: 0,
-  defense: 0,
-  dodgeBps: 0,
-  maxHealth: 0,
-  speed: 0
-});
+export interface BackpackCombatEffectSummaryV1 {
+  readonly maxHealthFlat: number;
+  readonly attackFlat: number;
+  readonly defenseFlat: number;
+  readonly speedFlat: number;
+  readonly critBpsFlat: number;
+  readonly dodgeBpsFlat: number;
+  readonly battleStartDamageFlat: number;
+  readonly lowHealthHealFlat: number;
+  readonly shieldFlat: number;
+  readonly notes: readonly string[];
+  readonly triggeredItemInstanceIds: readonly string[];
+}
+
+export type BackpackCombatTriggerCategoryV1 = "passive" | "battleStart" | "lowHealth";
+
+interface BackpackCombatEffectContributionV1 {
+  readonly instanceId: string;
+  readonly definitionId: string;
+  readonly trigger: BackpackCombatTriggerCategoryV1;
+  readonly note: string;
+  readonly maxHealthFlat?: number;
+  readonly attackFlat?: number;
+  readonly defenseFlat?: number;
+  readonly speedFlat?: number;
+  readonly critBpsFlat?: number;
+  readonly dodgeBpsFlat?: number;
+  readonly battleStartDamageFlat?: number;
+  readonly lowHealthHealFlat?: number;
+  readonly shieldFlat?: number;
+}
 
 export function computeBackpackHash(
   input: BackpackSnapshotV1 | BackpackHashInputV1
@@ -125,48 +149,97 @@ export function createBackpackSnapshot(
   };
 }
 
+export function validateBackpackSnapshot(backpack: BackpackSnapshotV1): void {
+  if (backpack.version !== 1) {
+    throw new RangeError("BackpackSnapshotV1.version must be 1.");
+  }
+  assertNonEmptyString(backpack.backpackHash, "backpack.backpackHash");
+  validateLayoutShape(backpack.layout);
+
+  const inventoryIds = new Set<string>();
+  for (const item of backpack.inventory) {
+    assertNonEmptyString(item.instanceId, "backpack.inventory.instanceId");
+    assertNonEmptyString(item.definitionId, "backpack.inventory.definitionId");
+    assertNonEmptyString(item.sourceKind, "backpack.inventory.sourceKind");
+    assertNonEmptyString(item.sourceRef, "backpack.inventory.sourceRef");
+    assertNonNegativeInteger(item.acquiredAt, "backpack.inventory.acquiredAt");
+    if (inventoryIds.has(item.instanceId)) {
+      throw new RangeError(`Duplicate backpack inventory item: ${item.instanceId}`);
+    }
+    inventoryIds.add(item.instanceId);
+  }
+
+  const definitionIds = new Set<string>();
+  for (const definition of backpack.itemDefinitions) {
+    assertNonEmptyString(definition.id, "backpack.itemDefinitions.id");
+    assertNonEmptyString(definition.name, "backpack.itemDefinitions.name");
+    assertNonEmptyString(definition.kind, "backpack.itemDefinitions.kind");
+    assertPositiveInteger(definition.size.width, "backpack.itemDefinitions.size.width");
+    assertPositiveInteger(definition.size.height, "backpack.itemDefinitions.size.height");
+    for (const effect of definition.effects) {
+      assertNonEmptyString(effect.description, "backpack.itemDefinitions.effects.description");
+    }
+    if (definitionIds.has(definition.id)) {
+      throw new RangeError(`Duplicate backpack item definition: ${definition.id}`);
+    }
+    definitionIds.add(definition.id);
+  }
+
+  const placedIds = new Set<string>();
+  for (const item of backpack.layout.placedItems) {
+    assertNonEmptyString(item.instanceId, "backpack.layout.placedItems.instanceId");
+    assertNonEmptyString(item.definitionId, "backpack.layout.placedItems.definitionId");
+    assertNonNegativeInteger(item.x, "backpack.layout.placedItems.x");
+    assertNonNegativeInteger(item.y, "backpack.layout.placedItems.y");
+    if (typeof item.rotated !== "boolean") {
+      throw new TypeError("backpack.layout.placedItems.rotated must be a boolean.");
+    }
+    if (placedIds.has(item.instanceId)) {
+      throw new RangeError(`Duplicate placed backpack item: ${item.instanceId}`);
+    }
+    placedIds.add(item.instanceId);
+
+    const instance = backpack.inventory.find(
+      (candidate) => candidate.instanceId === item.instanceId
+    );
+    if (!instance) {
+      throw new RangeError(`Placed backpack item is not in inventory: ${item.instanceId}`);
+    }
+    if (instance.definitionId !== item.definitionId) {
+      throw new RangeError(`Placed backpack item definition mismatch: ${item.instanceId}`);
+    }
+    if (!findDefinition(backpack.itemDefinitions, item.definitionId)) {
+      throw new RangeError(`Unknown placed backpack item definition: ${item.definitionId}`);
+    }
+
+    const layoutWithoutItem = {
+      ...backpack.layout,
+      placedItems: backpack.layout.placedItems.filter(
+        (candidate) => candidate.instanceId !== item.instanceId
+      )
+    };
+    if (!canPlaceItem(layoutWithoutItem, item, backpack.itemDefinitions)) {
+      throw new RangeError(`Invalid backpack item placement: ${item.instanceId}`);
+    }
+  }
+}
+
 export function computeBackpackStatBonuses(
   layout: BackpackLayoutV1,
   inventory: readonly BackpackItemInstanceV1[],
   definitions: BackpackDefinitionLookup
 ): BackpackStatBonusesV1 {
-  const bonuses = mutableBonuses();
   const placed = placedItemsWithDefinitions(layout, inventory, definitions);
+  const summary = summarizeBackpackCombatEffects(placed);
 
-  for (const item of placed) {
-    for (const effect of item.definition.effects) {
-      if (effect.stat && (effect.trigger === undefined || effect.trigger === "passive")) {
-        bonuses[effect.stat] += effect.flat ?? 0;
-      }
-    }
-  }
-
-  for (const charm of placed.filter((item) => item.definition.kind === "charm")) {
-    const charmEffectBps =
-      charm.definition.effects.find((effect) => effect.stat === "attack" && effect.bps)?.bps ?? 0;
-    if (charmEffectBps <= 0) {
-      continue;
-    }
-
-    for (const adjacent of placed) {
-      if (adjacent.placed.instanceId === charm.placed.instanceId) {
-        continue;
-      }
-      if (adjacent.definition.kind !== "gem" && adjacent.definition.kind !== "weapon") {
-        continue;
-      }
-      if (!areAdjacent(charm.placed, charm.definition, adjacent.placed, adjacent.definition)) {
-        continue;
-      }
-
-      const attackFlat = adjacent.definition.effects
-        .filter((effect) => effect.stat === "attack")
-        .reduce((total, effect) => total + (effect.flat ?? 0), 0);
-      bonuses.attack += Math.max(1, Math.floor((attackFlat * charmEffectBps) / 10_000));
-    }
-  }
-
-  return bonuses;
+  return {
+    attack: summary.attackFlat,
+    critBps: summary.critBpsFlat,
+    defense: summary.defenseFlat,
+    dodgeBps: summary.dodgeBpsFlat,
+    maxHealth: summary.maxHealthFlat,
+    speed: summary.speedFlat
+  };
 }
 
 export function applyBackpackStatBonuses(
@@ -181,6 +254,47 @@ export function applyBackpackStatBonuses(
     maxHealth: Math.max(1, stats.maxHealth + bonuses.maxHealth),
     speed: Math.max(1, stats.speed + bonuses.speed)
   };
+}
+
+export function computeBackpackCombatEffects(
+  backpack: BackpackSnapshotV1
+): BackpackCombatEffectSummaryV1 {
+  validateBackpackSnapshot(backpack);
+
+  return summarizeBackpackCombatEffects(
+    placedItemsWithDefinitions(backpack.layout, backpack.inventory, backpack.itemDefinitions)
+  );
+}
+
+export function applyBackpackCombatEffects(
+  stats: BattleCombatantStatsV1,
+  effects: BackpackCombatEffectSummaryV1
+): BattleCombatantStatsV1 {
+  return {
+    attack: Math.max(1, stats.attack + effects.attackFlat),
+    critBps: clampBps(stats.critBps + effects.critBpsFlat),
+    defense: Math.max(0, stats.defense + effects.defenseFlat),
+    dodgeBps: clampBps(stats.dodgeBps + effects.dodgeBpsFlat),
+    maxHealth: Math.max(1, stats.maxHealth + effects.maxHealthFlat),
+    speed: Math.max(1, stats.speed + effects.speedFlat)
+  };
+}
+
+export function collectBackpackCombatTriggerNotes(
+  backpack: BackpackSnapshotV1 | undefined,
+  trigger: BackpackCombatTriggerCategoryV1
+): readonly string[] {
+  if (backpack === undefined) {
+    return [];
+  }
+
+  validateBackpackSnapshot(backpack);
+
+  return combatEffectContributions(
+    placedItemsWithDefinitions(backpack.layout, backpack.inventory, backpack.itemDefinitions)
+  )
+    .filter((contribution) => contribution.trigger === trigger)
+    .map((contribution) => contribution.note);
 }
 
 export function collectBackpackTriggeredEffects(
@@ -203,8 +317,189 @@ export function collectBackpackTriggeredEffects(
   );
 }
 
-function mutableBonuses(): Record<BackpackStatKey, number> {
-  return { ...EMPTY_BONUSES };
+function summarizeBackpackCombatEffects(
+  placed: readonly {
+    readonly placed: PlacedBackpackItemV1;
+    readonly instance: BackpackItemInstanceV1;
+    readonly definition: BackpackItemDefinitionV1;
+  }[]
+): BackpackCombatEffectSummaryV1 {
+  const totals = mutableCombatEffects();
+  const notes: string[] = [];
+  const triggeredItemInstanceIds = new Set<string>();
+
+  for (const contribution of combatEffectContributions(placed)) {
+    totals.maxHealthFlat += contribution.maxHealthFlat ?? 0;
+    totals.attackFlat += contribution.attackFlat ?? 0;
+    totals.defenseFlat += contribution.defenseFlat ?? 0;
+    totals.speedFlat += contribution.speedFlat ?? 0;
+    totals.critBpsFlat += contribution.critBpsFlat ?? 0;
+    totals.dodgeBpsFlat += contribution.dodgeBpsFlat ?? 0;
+    totals.battleStartDamageFlat += contribution.battleStartDamageFlat ?? 0;
+    totals.lowHealthHealFlat += contribution.lowHealthHealFlat ?? 0;
+    totals.shieldFlat += contribution.shieldFlat ?? 0;
+    notes.push(contribution.note);
+    triggeredItemInstanceIds.add(contribution.instanceId);
+  }
+
+  return {
+    attackFlat: totals.attackFlat,
+    battleStartDamageFlat: totals.battleStartDamageFlat,
+    critBpsFlat: totals.critBpsFlat,
+    defenseFlat: totals.defenseFlat,
+    dodgeBpsFlat: totals.dodgeBpsFlat,
+    lowHealthHealFlat: totals.lowHealthHealFlat,
+    maxHealthFlat: totals.maxHealthFlat,
+    notes,
+    shieldFlat: totals.shieldFlat,
+    speedFlat: totals.speedFlat,
+    triggeredItemInstanceIds: [...triggeredItemInstanceIds].sort()
+  };
+}
+
+function combatEffectContributions(
+  placed: readonly {
+    readonly placed: PlacedBackpackItemV1;
+    readonly instance: BackpackItemInstanceV1;
+    readonly definition: BackpackItemDefinitionV1;
+  }[]
+): readonly BackpackCombatEffectContributionV1[] {
+  const contributions: BackpackCombatEffectContributionV1[] = [];
+
+  for (const item of placed) {
+    for (const effect of item.definition.effects) {
+      if (effect.flat === undefined) {
+        continue;
+      }
+
+      if (effect.stat !== undefined && isFlatStatCombatEffect(item.definition, effect)) {
+        contributions.push({
+          ...flatStatContribution(effect.stat, effect.flat),
+          definitionId: item.definition.id,
+          instanceId: item.instance.instanceId,
+          note: `${item.definition.name}: ${effect.description}`,
+          shieldFlat: item.definition.kind === "ward" && effect.stat === "defense" ? effect.flat : 0,
+          trigger: item.definition.kind === "ward" ? "battleStart" : "passive"
+        });
+        continue;
+      }
+
+      if (item.definition.kind === "bomb" && isBombDamageEffect(effect)) {
+        contributions.push({
+          battleStartDamageFlat: effect.flat,
+          definitionId: item.definition.id,
+          instanceId: item.instance.instanceId,
+          note: `${item.definition.name}: ${effect.description}`,
+          trigger: "battleStart"
+        });
+        continue;
+      }
+
+      if (item.definition.kind === "potion" && effect.trigger === "lowHealth") {
+        contributions.push({
+          definitionId: item.definition.id,
+          instanceId: item.instance.instanceId,
+          lowHealthHealFlat: effect.flat,
+          note: `${item.definition.name}: ${effect.description}`,
+          trigger: "lowHealth"
+        });
+      }
+    }
+  }
+
+  for (const item of placed) {
+    if (isRubyDefinition(item.definition) && hasAdjacentKind(item, placed, "weapon")) {
+      contributions.push({
+        attackFlat: 1,
+        definitionId: item.definition.id,
+        instanceId: item.instance.instanceId,
+        note: `${item.definition.name}: adjacent weapon attack +1.`,
+        trigger: "passive"
+      });
+    }
+
+    if (item.definition.kind === "charm" && hasAdjacentKind(item, placed, "gem")) {
+      contributions.push({
+        critBpsFlat: 100,
+        definitionId: item.definition.id,
+        instanceId: item.instance.instanceId,
+        note: `${item.definition.name}: adjacent gem critical chance +100 bps.`,
+        trigger: "passive"
+      });
+    }
+
+    if (item.definition.kind === "ward" && hasAdjacentKind(item, placed, "armor")) {
+      contributions.push({
+        defenseFlat: 1,
+        definitionId: item.definition.id,
+        instanceId: item.instance.instanceId,
+        note: `${item.definition.name}: adjacent armor defense +1.`,
+        trigger: "passive"
+      });
+    }
+  }
+
+  return contributions;
+}
+
+function mutableCombatEffects(): {
+  maxHealthFlat: number;
+  attackFlat: number;
+  defenseFlat: number;
+  speedFlat: number;
+  critBpsFlat: number;
+  dodgeBpsFlat: number;
+  battleStartDamageFlat: number;
+  lowHealthHealFlat: number;
+  shieldFlat: number;
+} {
+  return {
+    attackFlat: 0,
+    battleStartDamageFlat: 0,
+    critBpsFlat: 0,
+    defenseFlat: 0,
+    dodgeBpsFlat: 0,
+    lowHealthHealFlat: 0,
+    maxHealthFlat: 0,
+    shieldFlat: 0,
+    speedFlat: 0
+  };
+}
+
+function flatStatContribution(
+  stat: BackpackStatKey,
+  flat: number
+): Pick<
+  BackpackCombatEffectContributionV1,
+  "attackFlat" | "critBpsFlat" | "defenseFlat" | "dodgeBpsFlat" | "maxHealthFlat" | "speedFlat"
+> {
+  if (stat === "attack") return { attackFlat: flat };
+  if (stat === "critBps") return { critBpsFlat: flat };
+  if (stat === "defense") return { defenseFlat: flat };
+  if (stat === "dodgeBps") return { dodgeBpsFlat: flat };
+  if (stat === "maxHealth") return { maxHealthFlat: flat };
+  return { speedFlat: flat };
+}
+
+function isFlatStatCombatEffect(
+  definition: BackpackItemDefinitionV1,
+  effect: BackpackItemEffectV1
+): boolean {
+  return (
+    effect.flat !== undefined &&
+    effect.stat !== undefined &&
+    (effect.trigger === undefined ||
+      effect.trigger === "passive" ||
+      (definition.kind === "ward" && effect.trigger === "battleStart"))
+  );
+}
+
+function isBombDamageEffect(effect: BackpackItemEffectV1): boolean {
+  return (
+    effect.flat !== undefined &&
+    effect.stat === undefined &&
+    (effect.trigger === "battleStart" || effect.trigger === "turnStart")
+  );
 }
 
 function placedItemsWithDefinitions(
@@ -231,6 +526,29 @@ function placedItemsWithDefinitions(
       }
     ];
   });
+}
+
+function isRubyDefinition(definition: BackpackItemDefinitionV1): boolean {
+  return definition.kind === "gem" && definition.tags.includes("ruby");
+}
+
+function hasAdjacentKind(
+  item: {
+    readonly placed: PlacedBackpackItemV1;
+    readonly definition: BackpackItemDefinitionV1;
+  },
+  placedItems: readonly {
+    readonly placed: PlacedBackpackItemV1;
+    readonly definition: BackpackItemDefinitionV1;
+  }[],
+  kind: BackpackItemDefinitionV1["kind"]
+): boolean {
+  return placedItems.some(
+    (candidate) =>
+      candidate.placed.instanceId !== item.placed.instanceId &&
+      candidate.definition.kind === kind &&
+      areAdjacent(item.placed, item.definition, candidate.placed, candidate.definition)
+  );
 }
 
 function areAdjacent(
@@ -288,6 +606,38 @@ function isDefinitionArray(
   definitions: BackpackDefinitionLookup
 ): definitions is readonly BackpackItemDefinitionV1[] {
   return Array.isArray(definitions);
+}
+
+function validateLayoutShape(layout: BackpackLayoutV1): void {
+  if (layout.version !== 1) {
+    throw new RangeError("BackpackLayoutV1.version must be 1.");
+  }
+  assertPositiveInteger(layout.width, "backpack.layout.width");
+  assertPositiveInteger(layout.height, "backpack.layout.height");
+}
+
+function assertNonEmptyString(value: string, name: string): string {
+  if (value.trim().length === 0) {
+    throw new TypeError(`${name} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
+function assertPositiveInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new RangeError(`${name} must be a positive safe integer.`);
+  }
+
+  return value;
+}
+
+function assertNonNegativeInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative safe integer.`);
+  }
+
+  return value;
 }
 
 function clampBps(value: number): number {

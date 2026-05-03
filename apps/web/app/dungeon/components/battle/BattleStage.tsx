@@ -30,9 +30,13 @@ export function BattleStage({
         : 0;
   const hpSnapshot = getHpSnapshot(result, replayIndex, playerStats, enemyStats);
   const activeEntry = result?.log[Math.max(0, Math.min(replayIndex, result.log.length - 1))] ?? null;
+  const activeItemTrigger = (activeEntry?.itemTriggers?.length ?? 0) > 0;
 
   return (
-    <section className={styles.stagePanel} aria-label="Battle stage">
+    <section
+      className={`${styles.stagePanel} ${activeItemTrigger ? styles.itemGlow : ""}`}
+      aria-label="Battle stage"
+    >
       <div className={styles.stageTopline}>
         <h3 className={styles.stageTitle}>Hero vs Enemy</h3>
         <span className={styles.stagePhase}>{stagePhaseLabel(phase)}</span>
@@ -47,6 +51,7 @@ export function BattleStage({
           stats={playerStats}
           variant="player"
           active={activeEntry?.actor === "player"}
+          itemGlow={activeItemTrigger}
         />
         <div className={styles.versus}>VS</div>
         <CombatantCard
@@ -57,14 +62,41 @@ export function BattleStage({
           stats={enemyStats}
           variant={encounterKind === "boss" ? "boss" : "enemy"}
           active={activeEntry?.actor === "enemy"}
+          itemGlow={false}
         />
 
-        {activeEntry && (
+        {activeEntry && activeEntry.damage > 0 && (
           <FloatingDamageText
+            key={`${activeEntry.turn}-${activeEntry.action}-damage`}
             text={formatFloatingDamage(activeEntry)}
             side={activeEntry.actor === "player" ? "enemy" : "player"}
             critical={activeEntry.critical}
             dodged={activeEntry.dodged}
+          />
+        )}
+        {activeEntry && activeEntry.dodged && activeEntry.damage <= 0 && (
+          <FloatingDamageText
+            key={`${activeEntry.turn}-${activeEntry.action}-dodge`}
+            text="DODGE"
+            side={activeEntry.actor === "player" ? "enemy" : "player"}
+            dodged
+            variant="dodge"
+          />
+        )}
+        {activeEntry && (activeEntry.healDelta ?? 0) > 0 && (
+          <FloatingDamageText
+            key={`${activeEntry.turn}-${activeEntry.action}-heal`}
+            text={`+${activeEntry.healDelta} HP`}
+            side="player"
+            variant="heal"
+          />
+        )}
+        {activeEntry && (activeEntry.shieldDelta ?? 0) > 0 && (
+          <FloatingDamageText
+            key={`${activeEntry.turn}-${activeEntry.action}-shield`}
+            text={`+${activeEntry.shieldDelta} shield`}
+            side="player"
+            variant="shield"
           />
         )}
       </div>
@@ -80,6 +112,7 @@ function CombatantCard({
   stats,
   variant,
   active,
+  itemGlow,
 }: {
   readonly name: string;
   readonly avatar: string;
@@ -88,9 +121,16 @@ function CombatantCard({
   readonly stats?: BattleCombatantStatsV1;
   readonly variant: "player" | "enemy" | "boss";
   readonly active: boolean;
+  readonly itemGlow: boolean;
 }) {
   return (
-    <div className={`${styles.fighter} ${active ? styles.fighterActive : ""}`}>
+    <div
+      className={[
+        styles.fighter,
+        active ? styles.fighterActive : "",
+        itemGlow ? styles.fighterItemGlow : "",
+      ].join(" ")}
+    >
       <div
         className={`${styles.fighterAvatar} ${
           variant === "boss" ? styles.bossAvatar : variant === "enemy" ? styles.enemyAvatar : ""

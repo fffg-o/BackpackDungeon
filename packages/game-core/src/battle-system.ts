@@ -3,9 +3,14 @@ import {
   type CanonicalJsonValue,
   type EnemyConfig
 } from "@backpack-dungeon/shared";
-import type { BackpackSnapshotV1 } from "./backpack-effects.js";
-import type { BackpackItemDefinitionV1 } from "./backpack-items.js";
-import { getItemSize, type PlacedBackpackItemV1 } from "./backpack-layout.js";
+import {
+  applyBackpackCombatEffects,
+  collectBackpackCombatTriggerNotes,
+  computeBackpackCombatEffects,
+  validateBackpackSnapshot,
+  type BackpackCombatEffectSummaryV1,
+  type BackpackSnapshotV1
+} from "./backpack-effects.js";
 import { randomRange } from "./rng.js";
 
 export interface BattlePlayerSnapshotV1 {
@@ -51,17 +56,8 @@ export interface BattleCombatantStatsV1 {
   readonly dodgeBps: number;
 }
 
-export interface BackpackBattleStatsV1 {
-  readonly maxHealthFlat: number;
-  readonly attackFlat: number;
-  readonly defenseFlat: number;
-  readonly speedFlat: number;
-  readonly critBpsFlat: number;
-  readonly dodgeBpsFlat: number;
-  readonly battleStartDamageFlat: number;
-  readonly lowHealthHealFlat: number;
-  readonly notes: readonly string[];
-}
+export type BackpackBattleStatsV1 = BackpackCombatEffectSummaryV1;
+export const computeBackpackBattleStats = computeBackpackCombatEffects;
 
 export interface BattleLogEntryV1 {
   readonly turn: number;
@@ -84,6 +80,7 @@ export interface BattleResultV1 {
   readonly inputHash: string;
   readonly resultHash: string;
   readonly proofHash: string;
+  readonly backpackHash?: string;
   readonly encounterKind: "enemy" | "boss";
   readonly won: boolean;
   readonly turnsTaken: number;
@@ -185,7 +182,9 @@ const EMPTY_BACKPACK_BATTLE_STATS: BackpackBattleStatsV1 = Object.freeze({
   lowHealthHealFlat: 0,
   maxHealthFlat: 0,
   notes: Object.freeze([]),
-  speedFlat: 0
+  shieldFlat: 0,
+  speedFlat: 0,
+  triggeredItemInstanceIds: Object.freeze([])
 });
 
 export function buildBattleInput(params: BuildBattleInputParams): BattleInputV1 {
@@ -296,73 +295,7 @@ export function computePlayerBattleStats(
     return baseStats;
   }
 
-  return applyBackpackBattleStats(baseStats, computeBackpackBattleStats(backpack));
-}
-
-export function computeBackpackBattleStats(backpack: BackpackSnapshotV1): BackpackBattleStatsV1 {
-  validateBackpackSnapshot(backpack);
-
-  const totals = mutableBackpackBattleStats();
-  const placedItems = placedBackpackItems(backpack);
-
-  for (const item of placedItems) {
-    for (const effect of item.definition.effects) {
-      if (effect.flat === undefined) {
-        continue;
-      }
-
-      if (
-        effect.stat !== undefined &&
-        (effect.trigger === undefined ||
-          effect.trigger === "passive" ||
-          effect.trigger === "battleStart")
-      ) {
-        addBackpackFlatStat(totals, effect.stat, effect.flat);
-        totals.notes.push(`${item.definition.name}: ${effect.description}`);
-        continue;
-      }
-
-      if (effect.stat === undefined && effect.trigger === "battleStart") {
-        totals.battleStartDamageFlat += effect.flat;
-        totals.notes.push(`${item.definition.name}: ${effect.description}`);
-        continue;
-      }
-
-      if (effect.stat === undefined && effect.trigger === "lowHealth") {
-        totals.lowHealthHealFlat += effect.flat;
-        totals.notes.push(`${item.definition.name}: ${effect.description}`);
-      }
-    }
-  }
-
-  for (const item of placedItems) {
-    if (isRubyDefinition(item.definition) && hasAdjacentKind(item, placedItems, "weapon")) {
-      totals.attackFlat += 1;
-      totals.notes.push(`${item.definition.name}: adjacent weapon attack +1.`);
-    }
-
-    if (item.definition.kind === "charm" && hasAdjacentKind(item, placedItems, "gem")) {
-      totals.critBpsFlat += 100;
-      totals.notes.push(`${item.definition.name}: adjacent gem critical chance +100 bps.`);
-    }
-
-    if (item.definition.kind === "ward" && hasAdjacentKind(item, placedItems, "armor")) {
-      totals.defenseFlat += 1;
-      totals.notes.push(`${item.definition.name}: adjacent armor defense +1.`);
-    }
-  }
-
-  return {
-    attackFlat: totals.attackFlat,
-    battleStartDamageFlat: totals.battleStartDamageFlat,
-    critBpsFlat: totals.critBpsFlat,
-    defenseFlat: totals.defenseFlat,
-    dodgeBpsFlat: totals.dodgeBpsFlat,
-    lowHealthHealFlat: totals.lowHealthHealFlat,
-    maxHealthFlat: totals.maxHealthFlat,
-    notes: totals.notes,
-    speedFlat: totals.speedFlat
-  };
+  return applyBackpackCombatEffects(baseStats, computeBackpackCombatEffects(backpack));
 }
 
 export function simulateEnemyBattle(
@@ -554,7 +487,8 @@ function simulateCombat(input: BattleInputV1, maxTurns: number): CombatSimulatio
   const backpackStats =
     input.backpack === undefined
       ? EMPTY_BACKPACK_BATTLE_STATS
-      : computeBackpackBattleStats(input.backpack);
+      : computeBackpackCombatEffects(input.backpack);
+  const passiveBackpackTriggers = collectBackpackCombatTriggerNotes(input.backpack, "passive");
   const playerStats = computePlayerBattleStats(input.playerSnapshot, input.backpack);
   const enemyStats = computeEnemyBattleStats(input.enemySnapshot);
   const seed = computeBattleSeed(input);
@@ -568,8 +502,12 @@ function simulateCombat(input: BattleInputV1, maxTurns: number): CombatSimulatio
   let turn = 0;
   let rollIndex = 0;
   let lowHealthHealTriggered = false;
+  let passiveBackpackTriggersLogged = false;
 
-  if (backpackStats.battleStartDamageFlat > 0 && enemyHp > 0) {
+  if (
+    (backpackStats.battleStartDamageFlat > 0 || backpackStats.shieldFlat > 0) &&
+    enemyHp > 0
+  ) {
     const damage = Math.min(enemyHp, backpackStats.battleStartDamageFlat);
     enemyHp = Math.max(0, enemyHp - damage);
     playerDamageDealt += damage;
@@ -579,9 +517,10 @@ function simulateCombat(input: BattleInputV1, maxTurns: number): CombatSimulatio
         actor: "player",
         damage,
         enemyHpAfter: enemyHp,
-        itemTriggers: collectBackpackTriggerNotes(input.backpack, "battleStart"),
+        itemTriggers: collectBackpackCombatTriggerNotes(input.backpack, "battleStart"),
         note: "battleStart",
         playerHpAfter: playerHp,
+        shieldDelta: backpackStats.shieldFlat > 0 ? backpackStats.shieldFlat : undefined,
         turn
       })
     );
@@ -616,6 +555,14 @@ function simulateCombat(input: BattleInputV1, maxTurns: number): CombatSimulatio
         enemyDamageDealt += damage;
       }
 
+      const itemTriggers =
+        actor === "player" && !passiveBackpackTriggersLogged
+          ? passiveBackpackTriggers
+          : [];
+      if (actor === "player") {
+        passiveBackpackTriggersLogged = true;
+      }
+
       log.push(
         buildLogEntry({
           actor,
@@ -623,6 +570,7 @@ function simulateCombat(input: BattleInputV1, maxTurns: number): CombatSimulatio
           damage,
           dodged,
           enemyHpAfter: enemyHp,
+          itemTriggers,
           playerHpAfter: playerHp,
           roll: hitRoll,
           turn
@@ -647,7 +595,7 @@ function simulateCombat(input: BattleInputV1, maxTurns: number): CombatSimulatio
               damage: 0,
               enemyHpAfter: enemyHp,
               healDelta: heal,
-              itemTriggers: collectBackpackTriggerNotes(input.backpack, "lowHealth"),
+              itemTriggers: collectBackpackCombatTriggerNotes(input.backpack, "lowHealth"),
               note: "lowHealth",
               playerHpAfter: playerHp,
               turn
@@ -682,6 +630,7 @@ function finalizeBattleResult(
   const resultHashInput: BattleResultV1HashInput = {
     version: BATTLE_VERSION,
     inputHash,
+    backpackHash: input.backpack?.backpackHash,
     encounterKind: input.encounterKind,
     won: flags.won,
     turnsTaken: combat.turnsTaken,
@@ -744,6 +693,7 @@ function buildLogEntry(params: {
   readonly dodged: boolean;
   readonly playerHpAfter: number;
   readonly enemyHpAfter: number;
+  readonly itemTriggers?: readonly string[];
 }): BattleLogEntryV1 {
   const entry = {
     turn: params.turn,
@@ -754,7 +704,8 @@ function buildLogEntry(params: {
     critical: params.critical,
     dodged: params.dodged,
     playerHpAfter: params.playerHpAfter,
-    enemyHpAfter: params.enemyHpAfter
+    enemyHpAfter: params.enemyHpAfter,
+    itemTriggers: params.itemTriggers?.length ? params.itemTriggers : undefined
   };
 
   if (params.dodged) {
@@ -801,161 +752,6 @@ function buildItemLogEntry(params: {
     healDelta: params.healDelta,
     shieldDelta: params.shieldDelta
   };
-}
-
-function applyBackpackBattleStats(
-  stats: BattleCombatantStatsV1,
-  bonuses: BackpackBattleStatsV1
-): BattleCombatantStatsV1 {
-  return {
-    attack: Math.max(1, stats.attack + bonuses.attackFlat),
-    critBps: clamp(stats.critBps + bonuses.critBpsFlat, 0, BPS_DENOMINATOR),
-    defense: Math.max(0, stats.defense + bonuses.defenseFlat),
-    dodgeBps: clamp(stats.dodgeBps + bonuses.dodgeBpsFlat, 0, BPS_DENOMINATOR),
-    maxHealth: Math.max(1, stats.maxHealth + bonuses.maxHealthFlat),
-    speed: Math.max(1, stats.speed + bonuses.speedFlat)
-  };
-}
-
-function mutableBackpackBattleStats(): {
-  attackFlat: number;
-  battleStartDamageFlat: number;
-  critBpsFlat: number;
-  defenseFlat: number;
-  dodgeBpsFlat: number;
-  lowHealthHealFlat: number;
-  maxHealthFlat: number;
-  notes: string[];
-  speedFlat: number;
-} {
-  return {
-    attackFlat: 0,
-    battleStartDamageFlat: 0,
-    critBpsFlat: 0,
-    defenseFlat: 0,
-    dodgeBpsFlat: 0,
-    lowHealthHealFlat: 0,
-    maxHealthFlat: 0,
-    notes: [],
-    speedFlat: 0
-  };
-}
-
-function addBackpackFlatStat(
-  totals: ReturnType<typeof mutableBackpackBattleStats>,
-  stat: NonNullable<BackpackItemDefinitionV1["effects"][number]["stat"]>,
-  flat: number
-): void {
-  if (stat === "attack") totals.attackFlat += flat;
-  else if (stat === "critBps") totals.critBpsFlat += flat;
-  else if (stat === "defense") totals.defenseFlat += flat;
-  else if (stat === "dodgeBps") totals.dodgeBpsFlat += flat;
-  else if (stat === "maxHealth") totals.maxHealthFlat += flat;
-  else if (stat === "speed") totals.speedFlat += flat;
-}
-
-function placedBackpackItems(backpack: BackpackSnapshotV1): readonly {
-  readonly placed: PlacedBackpackItemV1;
-  readonly definition: BackpackItemDefinitionV1;
-}[] {
-  const inventoryIds = new Set(backpack.inventory.map((item) => item.instanceId));
-  return [...backpack.layout.placedItems]
-    .sort((a, b) => a.instanceId.localeCompare(b.instanceId))
-    .flatMap((placed) => {
-      if (!inventoryIds.has(placed.instanceId)) {
-        return [];
-      }
-      const definition = backpack.itemDefinitions.find(
-        (candidate) => candidate.id === placed.definitionId
-      );
-      if (!definition) {
-        return [];
-      }
-      return [{ placed, definition }];
-    });
-}
-
-function collectBackpackTriggerNotes(
-  backpack: BackpackSnapshotV1 | undefined,
-  trigger: "battleStart" | "lowHealth"
-): readonly string[] {
-  if (backpack === undefined) {
-    return [];
-  }
-
-  return placedBackpackItems(backpack).flatMap((item) =>
-    item.definition.effects
-      .filter(
-        (effect) =>
-          effect.trigger === trigger &&
-          effect.stat === undefined &&
-          effect.flat !== undefined
-      )
-      .map((effect) => `${item.definition.name}: ${effect.description}`)
-  );
-}
-
-function isRubyDefinition(definition: BackpackItemDefinitionV1): boolean {
-  return definition.kind === "gem" && definition.tags.includes("ruby");
-}
-
-function hasAdjacentKind(
-  item: {
-    readonly placed: PlacedBackpackItemV1;
-    readonly definition: BackpackItemDefinitionV1;
-  },
-  placedItems: readonly {
-    readonly placed: PlacedBackpackItemV1;
-    readonly definition: BackpackItemDefinitionV1;
-  }[],
-  kind: BackpackItemDefinitionV1["kind"]
-): boolean {
-  return placedItems.some(
-    (candidate) =>
-      candidate.placed.instanceId !== item.placed.instanceId &&
-      candidate.definition.kind === kind &&
-      areBackpackItemsAdjacent(item.placed, item.definition, candidate.placed, candidate.definition)
-  );
-}
-
-function areBackpackItemsAdjacent(
-  a: PlacedBackpackItemV1,
-  definitionA: BackpackItemDefinitionV1,
-  b: PlacedBackpackItemV1,
-  definitionB: BackpackItemDefinitionV1
-): boolean {
-  const rectA = backpackRectFor(a, definitionA);
-  const rectB = backpackRectFor(b, definitionB);
-  const horizontallyTouching =
-    (rectA.right + 1 === rectB.left || rectB.right + 1 === rectA.left) &&
-    rangesOverlap(rectA.top, rectA.bottom, rectB.top, rectB.bottom);
-  const verticallyTouching =
-    (rectA.bottom + 1 === rectB.top || rectB.bottom + 1 === rectA.top) &&
-    rangesOverlap(rectA.left, rectA.right, rectB.left, rectB.right);
-
-  return horizontallyTouching || verticallyTouching;
-}
-
-function backpackRectFor(
-  item: PlacedBackpackItemV1,
-  definition: BackpackItemDefinitionV1
-): {
-  readonly left: number;
-  readonly right: number;
-  readonly top: number;
-  readonly bottom: number;
-} {
-  const size = getItemSize(definition, item.rotated);
-  return {
-    bottom: item.y + size.height - 1,
-    left: item.x,
-    right: item.x + size.width - 1,
-    top: item.y
-  };
-}
-
-function rangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
-  return aStart <= bEnd && bStart <= aEnd;
 }
 
 function computeBattleScore(
@@ -1065,41 +861,6 @@ function validateEnemyConfig(enemyConfig: EnemyConfig): void {
   assertNonEmptyString(enemyConfig.rewardTier, "enemyConfig.rewardTier");
 }
 
-function validateBackpackSnapshot(backpack: BackpackSnapshotV1): void {
-  if (backpack.version !== 1) {
-    throw new RangeError("BackpackSnapshotV1.version must be 1.");
-  }
-  assertNonEmptyString(backpack.backpackHash, "backpack.backpackHash");
-  if (backpack.layout.version !== 1) {
-    throw new RangeError("BackpackLayoutV1.version must be 1.");
-  }
-  assertPositiveInteger(backpack.layout.width, "backpack.layout.width");
-  assertPositiveInteger(backpack.layout.height, "backpack.layout.height");
-
-  for (const item of backpack.inventory) {
-    assertNonEmptyString(item.instanceId, "backpack.inventory.instanceId");
-    assertNonEmptyString(item.definitionId, "backpack.inventory.definitionId");
-    assertNonEmptyString(item.sourceKind, "backpack.inventory.sourceKind");
-    assertNonEmptyString(item.sourceRef, "backpack.inventory.sourceRef");
-    assertNonNegativeInteger(item.acquiredAt, "backpack.inventory.acquiredAt");
-  }
-
-  for (const definition of backpack.itemDefinitions) {
-    assertNonEmptyString(definition.id, "backpack.itemDefinitions.id");
-    assertNonEmptyString(definition.name, "backpack.itemDefinitions.name");
-    assertNonEmptyString(definition.kind, "backpack.itemDefinitions.kind");
-    assertPositiveInteger(definition.size.width, "backpack.itemDefinitions.size.width");
-    assertPositiveInteger(definition.size.height, "backpack.itemDefinitions.size.height");
-  }
-
-  for (const item of backpack.layout.placedItems) {
-    assertNonEmptyString(item.instanceId, "backpack.layout.placedItems.instanceId");
-    assertNonEmptyString(item.definitionId, "backpack.layout.placedItems.definitionId");
-    assertNonNegativeInteger(item.x, "backpack.layout.placedItems.x");
-    assertNonNegativeInteger(item.y, "backpack.layout.placedItems.y");
-  }
-}
-
 function battleInputToCanonical(input: BattleInputV1): CanonicalJsonValue {
   return {
     attemptIndex: input.attemptIndex,
@@ -1141,6 +902,7 @@ function backpackSnapshotToBattleInputCanonical(
 
 function battleResultHashInputToCanonical(result: BattleResultV1HashInput): CanonicalJsonValue {
   return {
+    backpackHash: result.backpackHash,
     bossDamageScore: result.bossDamageScore,
     damageTaken: result.damageTaken,
     encounterKind: result.encounterKind,
