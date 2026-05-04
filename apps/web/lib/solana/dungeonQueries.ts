@@ -222,10 +222,10 @@ export async function fetchEnemyState(
   return {
     initialized: true,
     location: normalizeLocation(location),
-    clearCount: toNumber(enemy.clearCount, "enemy.clearCount"),
+    clearCount: toNumber(enemy.clearCount ?? enemy.clear_count, "enemy.clearCount"),
     difficultyLevel: enemy.difficultyLevel,
-    nextAvailableAt: toNumber(enemy.nextAvailableAt, "enemy.nextAvailableAt"),
-    cooldownEnd: toNumber(enemy.nextAvailableAt, "enemy.nextAvailableAt"),
+    nextAvailableAt: toNumber(enemy.nextAvailableAt ?? enemy.next_available_at, "enemy.nextAvailableAt"),
+    cooldownEnd: toNumber(enemy.nextAvailableAt ?? enemy.next_available_at, "enemy.nextAvailableAt"),
     baseHp: enemy.baseHp,
     baseDamage: enemy.baseDamage,
     valuableClearCap: enemy.valuableClearCap,

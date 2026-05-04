@@ -117,7 +117,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(320px, 0.95fr) minmax(380px, 1.22fr) minmax(300px, 0.86fr);
+  grid-template-columns: minmax(320px, 0.9fr) minmax(380px, 1.14fr) minmax(360px, 0.96fr);
   gap: 14px;
   padding: 14px;
   overflow: hidden;
@@ -126,6 +126,7 @@
 .setupPanel,
 .stagePanel,
 .sidePanel {
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: #121619;
@@ -640,9 +641,11 @@
 }
 
 .timeline {
+  flex: 1 1 320px;
   min-height: 0;
   overflow: auto;
   padding: 10px 12px 12px;
+  overscroll-behavior: contain;
 }
 
 .timelineEmpty {
@@ -743,6 +746,9 @@
 }
 
 .summary {
+  flex: 0 1 auto;
+  max-height: min(42%, 380px);
+  overflow: auto;
   padding: 12px;
   border-top: 1px solid #222a2f;
 }

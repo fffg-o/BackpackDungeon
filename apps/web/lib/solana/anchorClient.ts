@@ -52,8 +52,11 @@ export interface EnemyLocationAccount {
   readonly maxRewardTier: unknown;
   readonly valuableClearCap: number;
   readonly clearCount: IntegerAccountValue;
+  readonly clear_count: IntegerAccountValue;
   readonly baseCooldownSeconds: IntegerAccountValue;
+  readonly base_cooldown_seconds: IntegerAccountValue;
   readonly nextAvailableAt: IntegerAccountValue;
+  readonly next_available_at: IntegerAccountValue;
 }
 
 export interface ShopAccount {

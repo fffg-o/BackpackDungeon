@@ -3,6 +3,7 @@
 import type { RefObject } from "react";
 import type { BattleResultV1 } from "@backpack-dungeon/game-core";
 import type { BattleOverlayPhase } from "./BattleOverlay";
+import { localizeBackpackItemTriggerNote } from "../../../i18n/backpackItems";
 import { useI18n } from "../../../i18n/useI18n";
 import styles from "./battle.module.css";
 
@@ -178,7 +179,7 @@ function HashStat({
 
 function BackpackEffectsSummary({ result }: { readonly result: BattleResultV1 }) {
   const { t } = useI18n();
-  const triggers = aggregateItemTriggers(result);
+  const triggers = aggregateItemTriggers(result, t);
 
   return (
     <section className={styles.effectsSummary} aria-label={t("battle.effects")}>
@@ -377,12 +378,14 @@ function phaseHasResult(
 }
 
 function aggregateItemTriggers(
-  result: BattleResultV1
+  result: BattleResultV1,
+  t: ReturnType<typeof useI18n>["t"],
 ): readonly { readonly text: string; readonly count: number }[] {
   const counts = new Map<string, number>();
   for (const entry of result.log) {
     for (const trigger of entry.itemTriggers ?? []) {
-      counts.set(trigger, (counts.get(trigger) ?? 0) + 1);
+      const text = localizeBackpackItemTriggerNote(trigger, t);
+      counts.set(text, (counts.get(text) ?? 0) + 1);
     }
   }
 

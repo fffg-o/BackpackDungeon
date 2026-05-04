@@ -8,16 +8,26 @@ export interface ItemNameTooltipProps {
   readonly open: boolean;
   readonly name: string;
   readonly tier?: string;
+  readonly description?: string;
+  readonly effects?: readonly string[];
   readonly x: number;
   readonly y: number;
 }
 
-const TOOLTIP_WIDTH = 220;
-const TOOLTIP_HEIGHT = 58;
+const TOOLTIP_WIDTH = 280;
+const TOOLTIP_HEIGHT = 190;
 const CURSOR_OFFSET = 14;
 const VIEWPORT_PADDING = 8;
 
-export function ItemNameTooltip({ open, name, tier, x, y }: ItemNameTooltipProps) {
+export function ItemNameTooltip({
+  open,
+  name,
+  tier,
+  description,
+  effects = [],
+  x,
+  y,
+}: ItemNameTooltipProps) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -41,8 +51,16 @@ export function ItemNameTooltip({ open, name, tier, x, y }: ItemNameTooltipProps
 
   return createPortal(
     <div className={styles.tooltip} role="tooltip" style={style}>
-      {name}
+      <strong className={styles.tooltipName}>{name}</strong>
       {tier && <span className={styles.tooltipTier}>{tier}</span>}
+      {description && <p className={styles.tooltipDescription}>{description}</p>}
+      {effects.length > 0 && (
+        <ul className={styles.tooltipEffects}>
+          {effects.map((effect, index) => (
+            <li key={`${name}-effect-${index}`}>{effect}</li>
+          ))}
+        </ul>
+      )}
     </div>,
     document.body,
   );

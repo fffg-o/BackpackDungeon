@@ -59,6 +59,248 @@ export const dictionaries = {
       cooldown: "Cooldown",
       address: "{address}",
     },
+    items: {
+      tiers: {
+        Common: "Common",
+        Uncommon: "Uncommon",
+        Rare: "Rare",
+        Epic: "Epic",
+        Legendary: "Legendary",
+      },
+      triggerFormat: "{name}: {detail}",
+      triggers: {
+        adjacentWeaponAttack: "Adjacent weapon attack +1.",
+        adjacentGemCrit: "Adjacent gem critical chance +100 bps.",
+        adjacentArmorDefense: "Adjacent armor defense +1.",
+      },
+      definitions: {
+        "ruby-common": {
+          name: "Common Ruby",
+          description: "A compact ruby that adds 1 attack.",
+          effects: ["Attack +1."],
+        },
+        "ruby-uncommon": {
+          name: "Uncommon Ruby",
+          description: "A compact ruby that adds 2 attack.",
+          effects: ["Attack +2."],
+        },
+        "ruby-rare": {
+          name: "Rare Ruby",
+          description: "A compact ruby that adds 3 attack.",
+          effects: ["Attack +3."],
+        },
+        "ruby-epic": {
+          name: "Epic Ruby",
+          description: "A compact ruby that adds 4 attack.",
+          effects: ["Attack +4."],
+        },
+        "ruby-legendary": {
+          name: "Legendary Ruby",
+          description: "A compact ruby that adds 6 attack.",
+          effects: ["Attack +6."],
+        },
+        "training-dagger": {
+          name: "Training Dagger",
+          description: "A starter blade that adds 2 attack.",
+          effects: ["Attack +2."],
+        },
+        "iron-dagger-uncommon": {
+          name: "Iron Dagger",
+          description: "A narrow iron blade that adds 4 attack.",
+          effects: ["Attack +4."],
+        },
+        "iron-dagger-rare": {
+          name: "Iron Dagger",
+          description: "A honed iron blade that adds 6 attack.",
+          effects: ["Attack +6."],
+        },
+        "iron-dagger-epic": {
+          name: "Iron Dagger",
+          description: "A balanced iron blade that adds 8 attack.",
+          effects: ["Attack +8."],
+        },
+        "iron-dagger-legendary": {
+          name: "Iron Dagger",
+          description: "A rare duelist blade that adds 8 attack and critical chance.",
+          effects: ["Attack +8.", "Critical chance +250 bps."],
+        },
+        "wooden-shield": {
+          name: "Wooden Shield",
+          description: "A broad wooden shield that adds 1 defense.",
+          effects: ["Defense +1."],
+        },
+        "wooden-shield-uncommon": {
+          name: "Wooden Shield",
+          description: "A reinforced wooden shield that adds 2 defense.",
+          effects: ["Defense +2."],
+        },
+        "iron-armor-rare": {
+          name: "Iron Armor",
+          description: "Layered iron plates that add 3 defense.",
+          effects: ["Defense +3."],
+        },
+        "iron-armor-epic": {
+          name: "Iron Armor",
+          description: "Fine iron plates that add 4 defense.",
+          effects: ["Defense +4."],
+        },
+        "iron-armor-legendary": {
+          name: "Iron Armor",
+          description: "Masterwork iron plates that add 5 defense.",
+          effects: ["Defense +5."],
+        },
+        "potion-common": {
+          name: "Common Potion",
+          description: "A battle potion that marks used in combat and heals 18 HP.",
+          effects: ["Once per battle below 35% HP, heals 18 HP."],
+        },
+        "potion-uncommon": {
+          name: "Uncommon Potion",
+          description: "A battle potion that marks used in combat and heals 24 HP.",
+          effects: ["Once per battle below 35% HP, heals 24 HP."],
+        },
+        "potion-rare": {
+          name: "Rare Potion",
+          description: "A battle potion that marks used in combat and heals 32 HP.",
+          effects: ["Once per battle below 35% HP, heals 32 HP."],
+        },
+        "potion-epic": {
+          name: "Epic Potion",
+          description: "A battle potion that marks used in combat and heals 42 HP.",
+          effects: ["Once per battle below 35% HP, heals 42 HP."],
+        },
+        "potion-legendary": {
+          name: "Legendary Potion",
+          description: "A battle potion that marks used in combat and heals 56 HP.",
+          effects: ["Once per battle below 35% HP, heals 56 HP."],
+        },
+        "bomb-common": {
+          name: "Common Bomb",
+          description: "A volatile pack item that marks used in combat and deals 6 damage.",
+          effects: ["Deals 6 extra damage once per battle."],
+        },
+        "bomb-uncommon": {
+          name: "Uncommon Bomb",
+          description: "A volatile pack item that marks used in combat and deals 8 damage.",
+          effects: ["Deals 8 extra damage once per battle."],
+        },
+        "bomb-rare": {
+          name: "Rare Bomb",
+          description: "A volatile pack item that marks used in combat and deals 11 damage.",
+          effects: ["Deals 11 extra damage once per battle."],
+        },
+        "bomb-epic": {
+          name: "Epic Bomb",
+          description: "A volatile pack item that marks used in combat and deals 15 damage.",
+          effects: ["Deals 15 extra damage once per battle."],
+        },
+        "bomb-legendary": {
+          name: "Legendary Bomb",
+          description: "A volatile pack item that marks used in combat and deals 22 damage.",
+          effects: ["Deals 22 extra damage once per battle."],
+        },
+        "charm-common": {
+          name: "Common Charm",
+          description: "A small charm that boosts adjacent gems and weapons.",
+          effects: ["Adjacent gems and weapons gain 500 bps attack value."],
+        },
+        "charm-uncommon": {
+          name: "Uncommon Charm",
+          description: "A small charm that boosts adjacent gems and weapons.",
+          effects: ["Adjacent gems and weapons gain 700 bps attack value."],
+        },
+        "charm-rare": {
+          name: "Rare Charm",
+          description: "A small charm that boosts adjacent gems and weapons.",
+          effects: ["Adjacent gems and weapons gain 900 bps attack value."],
+        },
+        "charm-epic": {
+          name: "Epic Charm",
+          description: "A small charm that boosts adjacent gems and weapons.",
+          effects: ["Adjacent gems and weapons gain 1200 bps attack value."],
+        },
+        "charm-legendary": {
+          name: "Legendary Charm",
+          description: "A small charm that boosts adjacent gems and weapons.",
+          effects: ["Adjacent gems and weapons gain 1600 bps attack value."],
+        },
+        "ward-common": {
+          name: "Common Ward",
+          description: "A ward that grants 1 defense at battle start.",
+          effects: ["Battle start: defense +1."],
+        },
+        "ward-uncommon": {
+          name: "Uncommon Ward",
+          description: "A ward that grants 2 defense at battle start.",
+          effects: ["Battle start: defense +2."],
+        },
+        "ward-rare": {
+          name: "Rare Ward",
+          description: "A ward that grants 3 defense at battle start.",
+          effects: ["Battle start: defense +3."],
+        },
+        "ward-epic": {
+          name: "Epic Ward",
+          description: "A ward that grants 4 defense at battle start.",
+          effects: ["Battle start: defense +4."],
+        },
+        "ward-legendary": {
+          name: "Legendary Ward",
+          description: "A ward that grants 5 defense at battle start.",
+          effects: ["Battle start: defense +5."],
+        },
+        "ration-common": {
+          name: "Common Ration",
+          description: "Trail food that adds 6 max health.",
+          effects: ["Max health +6."],
+        },
+        "ration-uncommon": {
+          name: "Uncommon Ration",
+          description: "Trail food that adds 10 max health.",
+          effects: ["Max health +10."],
+        },
+        "ration-rare": {
+          name: "Rare Ration",
+          description: "Trail food that adds 14 max health.",
+          effects: ["Max health +14."],
+        },
+        "ration-epic": {
+          name: "Epic Ration",
+          description: "Trail food that adds 20 max health.",
+          effects: ["Max health +20."],
+        },
+        "ration-legendary": {
+          name: "Legendary Ration",
+          description: "Trail food that adds 30 max health.",
+          effects: ["Max health +30."],
+        },
+        "key-common": {
+          name: "Common Key",
+          description: "A light key that improves speed and critical chance.",
+          effects: ["Speed +3.", "Critical chance +100 bps."],
+        },
+        "key-uncommon": {
+          name: "Uncommon Key",
+          description: "A light key that improves speed and critical chance.",
+          effects: ["Speed +5.", "Critical chance +150 bps."],
+        },
+        "key-rare": {
+          name: "Rare Key",
+          description: "A light key that improves speed and critical chance.",
+          effects: ["Speed +7.", "Critical chance +225 bps."],
+        },
+        "key-epic": {
+          name: "Epic Key",
+          description: "A light key that improves speed and critical chance.",
+          effects: ["Speed +10.", "Critical chance +325 bps."],
+        },
+        "key-legendary": {
+          name: "Legendary Key",
+          description: "A light key that improves speed and critical chance.",
+          effects: ["Speed +14.", "Critical chance +500 bps."],
+        },
+      },
+    },
     wallet: {
       connected: "Connected: {address}",
       connectFirst: "Connect wallet first.",
@@ -441,6 +683,248 @@ export const dictionaries = {
       notScheduled: "未安排",
       cooldown: "冷却中",
       address: "{address}",
+    },
+    items: {
+      tiers: {
+        Common: "普通",
+        Uncommon: "精良",
+        Rare: "稀有",
+        Epic: "史诗",
+        Legendary: "传说",
+      },
+      triggerFormat: "{name}：{detail}",
+      triggers: {
+        adjacentWeaponAttack: "相邻武器：攻击 +1。",
+        adjacentGemCrit: "相邻宝石：暴击率 +100 bps。",
+        adjacentArmorDefense: "相邻护甲：防御 +1。",
+      },
+      definitions: {
+        "ruby-common": {
+          name: "普通红宝石",
+          description: "小巧红宝石，增加 1 点攻击。",
+          effects: ["攻击 +1。"],
+        },
+        "ruby-uncommon": {
+          name: "精良红宝石",
+          description: "小巧红宝石，增加 2 点攻击。",
+          effects: ["攻击 +2。"],
+        },
+        "ruby-rare": {
+          name: "稀有红宝石",
+          description: "小巧红宝石，增加 3 点攻击。",
+          effects: ["攻击 +3。"],
+        },
+        "ruby-epic": {
+          name: "史诗红宝石",
+          description: "小巧红宝石，增加 4 点攻击。",
+          effects: ["攻击 +4。"],
+        },
+        "ruby-legendary": {
+          name: "传说红宝石",
+          description: "小巧红宝石，增加 6 点攻击。",
+          effects: ["攻击 +6。"],
+        },
+        "training-dagger": {
+          name: "训练匕首",
+          description: "新手短刃，增加 2 点攻击。",
+          effects: ["攻击 +2。"],
+        },
+        "iron-dagger-uncommon": {
+          name: "铁匕首",
+          description: "窄刃铁匕首，增加 4 点攻击。",
+          effects: ["攻击 +4。"],
+        },
+        "iron-dagger-rare": {
+          name: "铁匕首",
+          description: "开刃铁匕首，增加 6 点攻击。",
+          effects: ["攻击 +6。"],
+        },
+        "iron-dagger-epic": {
+          name: "铁匕首",
+          description: "均衡铁匕首，增加 8 点攻击。",
+          effects: ["攻击 +8。"],
+        },
+        "iron-dagger-legendary": {
+          name: "铁匕首",
+          description: "稀有决斗匕首，增加 8 点攻击和暴击率。",
+          effects: ["攻击 +8。", "暴击率 +250 bps。"],
+        },
+        "wooden-shield": {
+          name: "木盾",
+          description: "宽木盾，增加 1 点防御。",
+          effects: ["防御 +1。"],
+        },
+        "wooden-shield-uncommon": {
+          name: "木盾",
+          description: "加固木盾，增加 2 点防御。",
+          effects: ["防御 +2。"],
+        },
+        "iron-armor-rare": {
+          name: "铁甲",
+          description: "层叠铁甲片，增加 3 点防御。",
+          effects: ["防御 +3。"],
+        },
+        "iron-armor-epic": {
+          name: "铁甲",
+          description: "精制铁甲片，增加 4 点防御。",
+          effects: ["防御 +4。"],
+        },
+        "iron-armor-legendary": {
+          name: "铁甲",
+          description: "大师级铁甲片，增加 5 点防御。",
+          effects: ["防御 +5。"],
+        },
+        "potion-common": {
+          name: "普通药水",
+          description: "战斗药水，战斗中触发一次并治疗 18 点生命。",
+          effects: ["每场战斗一次：生命低于 35% 时治疗 18 点生命。"],
+        },
+        "potion-uncommon": {
+          name: "精良药水",
+          description: "战斗药水，战斗中触发一次并治疗 24 点生命。",
+          effects: ["每场战斗一次：生命低于 35% 时治疗 24 点生命。"],
+        },
+        "potion-rare": {
+          name: "稀有药水",
+          description: "战斗药水，战斗中触发一次并治疗 32 点生命。",
+          effects: ["每场战斗一次：生命低于 35% 时治疗 32 点生命。"],
+        },
+        "potion-epic": {
+          name: "史诗药水",
+          description: "战斗药水，战斗中触发一次并治疗 42 点生命。",
+          effects: ["每场战斗一次：生命低于 35% 时治疗 42 点生命。"],
+        },
+        "potion-legendary": {
+          name: "传说药水",
+          description: "战斗药水，战斗中触发一次并治疗 56 点生命。",
+          effects: ["每场战斗一次：生命低于 35% 时治疗 56 点生命。"],
+        },
+        "bomb-common": {
+          name: "普通炸弹",
+          description: "不稳定的背包物品，战斗中触发一次并造成 6 点伤害。",
+          effects: ["每场战斗一次，造成 6 点额外伤害。"],
+        },
+        "bomb-uncommon": {
+          name: "精良炸弹",
+          description: "不稳定的背包物品，战斗中触发一次并造成 8 点伤害。",
+          effects: ["每场战斗一次，造成 8 点额外伤害。"],
+        },
+        "bomb-rare": {
+          name: "稀有炸弹",
+          description: "不稳定的背包物品，战斗中触发一次并造成 11 点伤害。",
+          effects: ["每场战斗一次，造成 11 点额外伤害。"],
+        },
+        "bomb-epic": {
+          name: "史诗炸弹",
+          description: "不稳定的背包物品，战斗中触发一次并造成 15 点伤害。",
+          effects: ["每场战斗一次，造成 15 点额外伤害。"],
+        },
+        "bomb-legendary": {
+          name: "传说炸弹",
+          description: "不稳定的背包物品，战斗中触发一次并造成 22 点伤害。",
+          effects: ["每场战斗一次，造成 22 点额外伤害。"],
+        },
+        "charm-common": {
+          name: "普通护符",
+          description: "小护符，增强相邻宝石和武器。",
+          effects: ["相邻宝石和武器获得 500 bps 攻击收益。"],
+        },
+        "charm-uncommon": {
+          name: "精良护符",
+          description: "小护符，增强相邻宝石和武器。",
+          effects: ["相邻宝石和武器获得 700 bps 攻击收益。"],
+        },
+        "charm-rare": {
+          name: "稀有护符",
+          description: "小护符，增强相邻宝石和武器。",
+          effects: ["相邻宝石和武器获得 900 bps 攻击收益。"],
+        },
+        "charm-epic": {
+          name: "史诗护符",
+          description: "小护符，增强相邻宝石和武器。",
+          effects: ["相邻宝石和武器获得 1200 bps 攻击收益。"],
+        },
+        "charm-legendary": {
+          name: "传说护符",
+          description: "小护符，增强相邻宝石和武器。",
+          effects: ["相邻宝石和武器获得 1600 bps 攻击收益。"],
+        },
+        "ward-common": {
+          name: "普通结界",
+          description: "结界，在战斗开始时提供 1 点防御。",
+          effects: ["战斗开始：防御 +1。"],
+        },
+        "ward-uncommon": {
+          name: "精良结界",
+          description: "结界，在战斗开始时提供 2 点防御。",
+          effects: ["战斗开始：防御 +2。"],
+        },
+        "ward-rare": {
+          name: "稀有结界",
+          description: "结界，在战斗开始时提供 3 点防御。",
+          effects: ["战斗开始：防御 +3。"],
+        },
+        "ward-epic": {
+          name: "史诗结界",
+          description: "结界，在战斗开始时提供 4 点防御。",
+          effects: ["战斗开始：防御 +4。"],
+        },
+        "ward-legendary": {
+          name: "传说结界",
+          description: "结界，在战斗开始时提供 5 点防御。",
+          effects: ["战斗开始：防御 +5。"],
+        },
+        "ration-common": {
+          name: "普通口粮",
+          description: "旅行口粮，增加 6 点最大生命。",
+          effects: ["最大生命 +6。"],
+        },
+        "ration-uncommon": {
+          name: "精良口粮",
+          description: "旅行口粮，增加 10 点最大生命。",
+          effects: ["最大生命 +10。"],
+        },
+        "ration-rare": {
+          name: "稀有口粮",
+          description: "旅行口粮，增加 14 点最大生命。",
+          effects: ["最大生命 +14。"],
+        },
+        "ration-epic": {
+          name: "史诗口粮",
+          description: "旅行口粮，增加 20 点最大生命。",
+          effects: ["最大生命 +20。"],
+        },
+        "ration-legendary": {
+          name: "传说口粮",
+          description: "旅行口粮，增加 30 点最大生命。",
+          effects: ["最大生命 +30。"],
+        },
+        "key-common": {
+          name: "普通钥匙",
+          description: "轻巧钥匙，提高速度和暴击率。",
+          effects: ["速度 +3。", "暴击率 +100 bps。"],
+        },
+        "key-uncommon": {
+          name: "精良钥匙",
+          description: "轻巧钥匙，提高速度和暴击率。",
+          effects: ["速度 +5。", "暴击率 +150 bps。"],
+        },
+        "key-rare": {
+          name: "稀有钥匙",
+          description: "轻巧钥匙，提高速度和暴击率。",
+          effects: ["速度 +7。", "暴击率 +225 bps。"],
+        },
+        "key-epic": {
+          name: "史诗钥匙",
+          description: "轻巧钥匙，提高速度和暴击率。",
+          effects: ["速度 +10。", "暴击率 +325 bps。"],
+        },
+        "key-legendary": {
+          name: "传说钥匙",
+          description: "轻巧钥匙，提高速度和暴击率。",
+          effects: ["速度 +14。", "暴击率 +500 bps。"],
+        },
+      },
     },
     wallet: {
       connected: "已连接：{address}",

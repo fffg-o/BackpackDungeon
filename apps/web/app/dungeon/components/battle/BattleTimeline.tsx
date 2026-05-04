@@ -2,6 +2,7 @@
 
 import type { BattleLogEntryV1, BattleResultV1 } from "@backpack-dungeon/game-core";
 import type { BattleOverlayPhase } from "./BattleOverlay";
+import { localizeBackpackItemTriggerNote } from "../../../i18n/backpackItems";
 import { useI18n } from "../../../i18n/useI18n";
 import styles from "./battle.module.css";
 
@@ -67,18 +68,21 @@ function TimelineEntry({
       </div>
       {itemTriggers.length > 0 && (
         <div className={styles.logBadges}>
-          {itemTriggers.map((trigger, index) => (
-            <span
-              key={`${entry.turn}-${index}-${trigger}`}
-              className={[
-                styles.logItemTrigger,
-                active && index === itemTriggers.length - 1 ? styles.logItemTriggerActive : "",
-              ].join(" ")}
-              title={trigger}
-            >
-              T{entry.turn} {trigger}
-            </span>
-          ))}
+          {itemTriggers.map((trigger, index) => {
+            const localizedTrigger = localizeBackpackItemTriggerNote(trigger, t);
+            return (
+              <span
+                key={`${entry.turn}-${index}-${trigger}`}
+                className={[
+                  styles.logItemTrigger,
+                  active && index === itemTriggers.length - 1 ? styles.logItemTriggerActive : "",
+                ].join(" ")}
+                title={localizedTrigger}
+              >
+                T{entry.turn} {localizedTrigger}
+              </span>
+            );
+          })}
         </div>
       )}
     </div>

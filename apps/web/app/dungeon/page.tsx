@@ -8,6 +8,12 @@ import { BattleOverlay, type BattleOverlayPhase } from "./components/battle/Batt
 import { BackpackManagerModal } from "./components/backpack/BackpackManagerModal";
 import { StatPill } from "./components/StatPill";
 import { useBackpackInventory } from "./hooks/useBackpackInventory";
+import {
+  localizeBackpackItem,
+  localizeBackpackItemEffectSummary,
+  localizeBackpackItemName,
+  localizeRewardTier,
+} from "../i18n/backpackItems";
 import { useI18n } from "../i18n/useI18n";
 import {
   buildBattleInput,
@@ -259,9 +265,11 @@ function itemIcon(definition: BackpackItemDefinitionV1): string {
   return icons[definition.icon] ?? definition.icon;
 }
 
-function itemEffectSummary(definition: BackpackItemDefinitionV1): string {
-  if (definition.effects.length === 0) return definition.description;
-  return definition.effects.map((effect) => effect.description).join(" ");
+function itemEffectSummary(
+  definition: BackpackItemDefinitionV1,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  return localizeBackpackItemEffectSummary(definition, t);
 }
 
 function shopRestockInfo(
@@ -1166,7 +1174,7 @@ export default function DailyDungeonPage() {
         setTxSignature(signature);
         await refreshAfterTx();
         pushToast({
-          title: t("shop.bought", { name: definition.name }),
+          title: t("shop.bought", { name: localizeBackpackItemName(definition, t) }),
           message: placement.placed
             ? t("backpack.added")
             : t("backpack.addedInventoryNoRoom"),
@@ -2251,6 +2259,7 @@ function ShopContent({
         };
         const preview = previewBackpackItemFromShopSlot(previewSlot);
         const definition = preview.definition;
+        const localized = localizeBackpackItem(definition, t);
         const isInitializing =
           txPending === shopTxKey("initShopSlot", index) ||
           (shopActionPhase.phase === "initializingSlot" && shopActionPhase.slotIndex === index);
@@ -2277,7 +2286,7 @@ function ShopContent({
                 {itemIcon(definition)}
               </span>
               <div className={styles.shopItemTitle}>
-                <span className={styles.shopSlotName}>{definition.name}</span>
+                <span className={styles.shopSlotName}>{localized.name}</span>
                 <span className={styles.shopItemSubline}>
                   {t("shop.itemPrice", { price: formatGold(price) })}
                 </span>
@@ -2286,10 +2295,10 @@ function ShopContent({
                 className={styles.shopSlotTier}
                 style={{ color: rewardTierColor(definition.tier) }}
               >
-                {definition.tier}
+                {localized.tier}
               </span>
             </div>
-            <p className={styles.shopEffectSummary}>{itemEffectSummary(definition)}</p>
+            <p className={styles.shopEffectSummary}>{itemEffectSummary(definition, t)}</p>
             {!stockInfo?.initialized ? (
               <>
                 <p className={styles.hint}>{t("shop.slotNotInitialized", { index })}</p>
@@ -2432,13 +2441,14 @@ function BossContent({
     bossBattlePhase.phase === "result" || bossBattlePhase.phase === "success"
       ? bossBattlePhase.damage
       : null;
+  const rewardTierLabel = localizeRewardTier(boss.rewardTier, t);
 
   return (
     <div className={`${styles.detailCard} ${styles.bossCard}`}>
       <div className={styles.bossHeader}>
         <div>
           <h3 className={styles.sectionTitle}>👑 {onChain?.bossName ?? boss.name}</h3>
-          <p className={styles.bossSubtitle}>{t("boss.subtitle", { tier: boss.rewardTier })}</p>
+          <p className={styles.bossSubtitle}>{t("boss.subtitle", { tier: rewardTierLabel })}</p>
         </div>
         <span className={onChain?.bossNftClaimed ? styles.badgeOk : styles.badgeWarn}>
           {onChain?.bossNftClaimed ? t("boss.nftClaimed") : t("boss.nftNotClaimed")}
@@ -2455,7 +2465,7 @@ function BossContent({
         <ShopCardStat label={t("boss.name")} value={onChain?.bossName ?? boss.name} />
         <ShopCardStat label={t("boss.level")} value={boss.level} />
         <ShopCardStat label={t("boss.hp")} value={bossHp} />
-        <ShopCardStat label={t("boss.rewardTier")} value={boss.rewardTier} />
+        <ShopCardStat label={t("boss.rewardTier")} value={rewardTierLabel} />
         <ShopCardStat label={t("boss.shardCount")} value={onChain?.bossShards?.length ?? "-"} />
         <ShopCardStat label={t("boss.playerShard")} value={selectedBossShardIndex ?? "-"} />
         <ShopCardStat label={t("boss.shardDamage")} value={currentShardDamage} />
@@ -2625,6 +2635,8 @@ function TreasureContent({
   const previewDefinition = previewItem
     ? getBackpackItemDefinition(previewItem.definitionId)
     : getBackpackItemDefinition("ruby-common");
+  const localizedPreview = localizeBackpackItem(previewDefinition, t);
+  const tierLabel = localizeRewardTier(tier, t);
   const canRestore = Boolean(onChain?.dailyRewardClaimed && !hasBackpackItem);
 
   return (
@@ -2637,7 +2649,7 @@ function TreasureContent({
         <div className={styles.detailMeta}>
           <span className={styles.metaLabel}>{t("dungeon.labels.rewardTier")}</span>
           <span className={styles.metaValue} style={{ color: rewardTierColor(tier) }}>
-            {tier}
+            {tierLabel}
           </span>
         </div>
         <div className={styles.detailMeta}>
@@ -2681,9 +2693,9 @@ function TreasureContent({
             {itemIcon(previewDefinition)}
           </span>
           <div className={styles.rewardPreviewBody}>
-            <strong>{previewDefinition.name}</strong>
-            <span>{previewDefinition.tier}</span>
-            <p>{itemEffectSummary(previewDefinition)}</p>
+            <strong>{localizedPreview.name}</strong>
+            <span>{localizedPreview.tier}</span>
+            <p>{itemEffectSummary(previewDefinition, t)}</p>
           </div>
         </div>
         <div className={styles.detailMeta}>

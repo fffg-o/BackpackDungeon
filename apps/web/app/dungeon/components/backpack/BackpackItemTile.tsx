@@ -6,6 +6,7 @@ import type {
   BackpackItemInstanceV1,
 } from "@backpack-dungeon/game-core";
 import { ItemNameTooltip } from "./ItemNameTooltip";
+import { localizeBackpackItem } from "../../../i18n/backpackItems";
 import { useI18n } from "../../../i18n/useI18n";
 import styles from "./backpack.module.css";
 
@@ -36,6 +37,7 @@ export function BackpackItemTile({
   onDragStart,
 }: BackpackItemTileProps) {
   const { t } = useI18n();
+  const localized = localizeBackpackItem(definition, t);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState<TooltipPosition | null>(null);
 
@@ -76,13 +78,13 @@ export function BackpackItemTile({
         onMouseLeave={() => setTooltipPosition(null)}
         onFocus={showTooltipFromAnchor}
         onBlur={() => setTooltipPosition(null)}
-        title={definition.name}
-        aria-label={`${definition.name}${placed ? `, ${t("backpack.placed")}` : ""}${rotated ? `, ${t("backpack.rotated")}` : ""}`}
+        title={localized.name}
+        aria-label={`${localized.name}${placed ? `, ${t("backpack.placed")}` : ""}${rotated ? `, ${t("backpack.rotated")}` : ""}`}
       >
         <span className={styles.itemTileIcon} aria-hidden="true">
           {iconLabel(definition)}
         </span>
-        <span className={styles.itemTileName}>{definition.name}</span>
+        <span className={styles.itemTileName}>{localized.name}</span>
         <span className={styles.itemTileState} aria-hidden="true">
           {placed && <span className={styles.itemTileDot} />}
           {rotated && <span className={`${styles.itemTileDot} ${styles.itemTileRotateDot}`} />}
@@ -90,8 +92,10 @@ export function BackpackItemTile({
       </button>
       <ItemNameTooltip
         open={tooltipPosition !== null}
-        name={definition.name}
-        tier={definition.tier}
+        name={localized.name}
+        tier={localized.tier}
+        description={localized.description}
+        effects={localized.effects}
         x={tooltipPosition?.x ?? 0}
         y={tooltipPosition?.y ?? 0}
       />
