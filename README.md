@@ -1,54 +1,17 @@
+[English](README_EN.md)
+
+![](backpack.png)
+
 # BackpackDungeon
 
 BackpackDungeon 是一个基于 Solana 的 pnpm monorepo 项目，用于 Packrun 游戏基础架构。包含链上 Anchor 程序、确定性游戏逻辑引擎、共享类型库和 Web 前端。
 
-## 项目结构
+## 项目介绍ppt
 
-```
-BackpackDungeon/
-├── apps/
-│   └── web/                          # Next.js + TypeScript Web 前端
-│       ├── app/
-│       │   ├── dungeon/
-│       │   │   ├── battle-sim.ts     # 战斗模拟器
-│       │   │   └── page.tsx          # 地牢页面
-│       │   ├── layout.tsx
-│       │   └── page.tsx
-│       └── lib/solana/               # Solana 客户端库
-│           ├── anchorClient.ts
-│           ├── constants.ts
-│           ├── converters.ts
-│           ├── dungeonQueries.ts
-│           ├── dungeonTxs.ts
-│           ├── pdas.ts
-│           └── shopMath.ts
-├── packages/
-│   ├── game-core/                    # 确定性游戏逻辑引擎
-│   │   ├── src/
-│   │   │   ├── boss-shards.ts       # BOSS 碎片逻辑
-│   │   │   ├── daily-config.ts      # 每日地图默认参数和数字随机种子配置
-│   │   │   ├── daily-map.ts         # 每日地图生成
-│   │   │   ├── enemy-scaling.ts     # 敌人属性缩放
-│   │   │   ├── location-merkle.ts   # 位置 Merkle 树
-│   │   │   ├── rng.ts              # 确定性 RNG
-│   │   │   └── shop-logic.ts       # 商店逻辑
-│   │   └── test/                    # 单元测试
-│   ├── shared/                       # 共享类型和工具
-│   │   ├── src/
-│   │   │   ├── index.ts            # 类型定义、SHA-256、PDA 种子
-│   │   │   └── nft-metadata.ts     # NFT 元数据构建器
-│   │   └── test/
-│   └── cnft-adapter/                # cNFT 适配器（含 Mock）
-├── programs/
-│   └── packrun/                     # Anchor Solana 程序
-│       └── src/lib.rs
-├── tests/
-│   ├── packrun.test.mjs             # 测试入口（由 Anchor.toml 引用）
-│   ├── packrun.gameplay.test.mjs    # 游戏逻辑集成测试（68 项）
-│   └── packrun.anchor.test.mjs      # Anchor 本地网集成测试
-├── Anchor.toml
-└── start.sh                         # 一键启动脚本
-```
+[简体中文版](BackpackDungeon_Pitch_Deck_CN.pptx)
+
+[英文版](BackpackDungeon_Pitch_Deck_EN.pptx)
+
 
 ## 快速开始
 
@@ -109,11 +72,6 @@ PACKRUN_RANDOM_SEED=123456 ./start.sh
 PACKRUN_DAY_ID=2026-04-26 PACKRUN_RANDOM_SEED=123456 ./start.sh
 ```
 
-`start.sh` 会用同一组配置初始化链上账户并启动 Web 前端，避免地图和 Merkle root 不一致。
-
-地图现在每天只生成 1 个 Boss；该规则会改变 `mapRoot`，本地已经用旧 dayId 初始化过的 localnet 需要 reset ledger，或换一个新的 `PACKRUN_DAY_ID`。
-
-PlayerRun 现在包含链上金币余额 `gold_balance`，账户空间比旧版本增加 8 bytes。升级后如果本地已有旧 `PlayerRun` 账户，前端会把金币显示为 0 并提示迁移；本地开发请 reset localnet ledger，或换一个新的 `PACKRUN_DAY_ID` / `NEXT_PUBLIC_PACKRUN_DAY_ID` 重新进入地牢。
 
 ### 启动 Web 前端（单独）
 
@@ -131,6 +89,56 @@ pnpm --filter @backpack-dungeon/web dev
 | `pnpm test:gameplay` | 运行游戏逻辑集成测试 |
 | `pnpm test:anchor` | 运行 Anchor 集成测试 |
 | `NO_DNA=1 anchor test` | 运行 Anchor 测试（跳过 DNA） |
+
+
+## 项目结构
+
+```
+BackpackDungeon/
+├── apps/
+│   └── web/                          # Next.js + TypeScript Web 前端
+│       ├── app/
+│       │   ├── dungeon/
+│       │   │   ├── battle-sim.ts     # 战斗模拟器
+│       │   │   └── page.tsx          # 地牢页面
+│       │   ├── layout.tsx
+│       │   └── page.tsx
+│       └── lib/solana/               # Solana 客户端库
+│           ├── anchorClient.ts
+│           ├── constants.ts
+│           ├── converters.ts
+│           ├── dungeonQueries.ts
+│           ├── dungeonTxs.ts
+│           ├── pdas.ts
+│           └── shopMath.ts
+├── packages/
+│   ├── game-core/                    # 确定性游戏逻辑引擎
+│   │   ├── src/
+│   │   │   ├── boss-shards.ts       # BOSS 碎片逻辑
+│   │   │   ├── daily-config.ts      # 每日地图默认参数和数字随机种子配置
+│   │   │   ├── daily-map.ts         # 每日地图生成
+│   │   │   ├── enemy-scaling.ts     # 敌人属性缩放
+│   │   │   ├── location-merkle.ts   # 位置 Merkle 树
+│   │   │   ├── rng.ts              # 确定性 RNG
+│   │   │   └── shop-logic.ts       # 商店逻辑
+│   │   └── test/                    # 单元测试
+│   ├── shared/                       # 共享类型和工具
+│   │   ├── src/
+│   │   │   ├── index.ts            # 类型定义、SHA-256、PDA 种子
+│   │   │   └── nft-metadata.ts     # NFT 元数据构建器
+│   │   └── test/
+│   └── cnft-adapter/                # cNFT 适配器（含 Mock）
+├── programs/
+│   └── packrun/                     # Anchor Solana 程序
+│       └── src/lib.rs
+├── tests/
+│   ├── packrun.test.mjs             # 测试入口（由 Anchor.toml 引用）
+│   ├── packrun.gameplay.test.mjs    # 游戏逻辑集成测试（68 项）
+│   └── packrun.anchor.test.mjs      # Anchor 本地网集成测试
+├── Anchor.toml
+└── start.sh                         # 一键启动脚本
+```
+
 
 ## 技术栈
 
