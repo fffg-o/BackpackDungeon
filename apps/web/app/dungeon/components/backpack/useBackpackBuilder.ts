@@ -8,6 +8,7 @@ import {
   type BackpackLayoutV1,
 } from "@backpack-dungeon/game-core";
 import type { BackpackPlacementPreview } from "./BackpackGrid";
+import { useI18n } from "../../../i18n/useI18n";
 
 export interface UseBackpackBuilderOptions {
   readonly layout: BackpackLayoutV1;
@@ -24,6 +25,7 @@ export function useBackpackBuilder({
   onRotateItem,
   keyboardEnabled = true,
 }: UseBackpackBuilderOptions) {
+  const { t } = useI18n();
   const [selectedInstanceId, setSelectedInstanceId] = useState<string | null>(
     inventory[0]?.instanceId ?? null,
   );
@@ -59,9 +61,9 @@ export function useBackpackBuilder({
   const preview = useMemo(
     () =>
       hoveredCell && selectedItem
-        ? placementPreview(layout, selectedItem, hoveredCell.x, hoveredCell.y, selectedRotated)
+        ? placementPreview(layout, selectedItem, hoveredCell.x, hoveredCell.y, selectedRotated, t)
         : null,
-    [hoveredCell, layout, selectedItem, selectedRotated],
+    [hoveredCell, layout, selectedItem, selectedRotated, t],
   );
   const backpackFull = useMemo(
     () => inventory.some((item) => !isPlaced(layout, item.instanceId)) && !hasAnyRoom(layout, inventory),
@@ -84,7 +86,7 @@ export function useBackpackBuilder({
     (x: number, y: number, droppedInstanceId?: string | null) => {
       const instanceId = droppedInstanceId ?? selectedInstanceId;
       if (!instanceId) {
-        setFeedback("Select an item first");
+        setFeedback(t("backpack.selectFirst"));
         return;
       }
 
@@ -93,19 +95,19 @@ export function useBackpackBuilder({
 
       const placed = layout.placedItems.find((candidate) => candidate.instanceId === instanceId);
       const rotated = draftRotations.get(instanceId) ?? placed?.rotated ?? false;
-      const nextPreview = placementPreview(layout, item, x, y, rotated);
+      const nextPreview = placementPreview(layout, item, x, y, rotated, t);
       setSelectedInstanceId(instanceId);
       setHoveredCell({ x, y });
 
       if (!nextPreview.valid) {
-        setFeedback(nextPreview.reason ?? "No room here");
+        setFeedback(nextPreview.reason ?? t("backpack.noRoom"));
         return;
       }
 
       onMoveItem(instanceId, x, y, rotated);
       setFeedback(null);
     },
-    [draftRotations, inventory, layout, onMoveItem, selectedInstanceId],
+    [draftRotations, inventory, layout, onMoveItem, selectedInstanceId, t],
   );
 
   const rotateSelected = useCallback(() => {
@@ -119,9 +121,10 @@ export function useBackpackBuilder({
         selectedPlaced.x,
         selectedPlaced.y,
         nextRotated,
+        t,
       );
       if (!nextPreview.valid) {
-        setFeedback(nextPreview.reason ?? "No room here");
+        setFeedback(nextPreview.reason ?? t("backpack.noRoom"));
         return;
       }
       onRotateItem(selectedInstanceId);
@@ -139,6 +142,7 @@ export function useBackpackBuilder({
     selectedItem,
     selectedPlaced,
     selectedRotated,
+    t,
   ]);
 
   useEffect(() => {
@@ -175,19 +179,28 @@ function placementPreview(
   x: number,
   y: number,
   rotated: boolean,
+  t?: ReturnType<typeof useI18n>["t"],
 ): BackpackPlacementPreview {
   const definition = getDefinitionSafe(item.definitionId);
   if (!definition) {
-    return { height: 1, reason: "Unknown item", valid: false, width: 1, x, y };
+    return { height: 1, reason: translateReason(t, "backpack.unknownItem", "Unknown item"), valid: false, width: 1, x, y };
   }
   const size = getItemSize(definition, rotated);
   if (x + size.width > layout.width || y + size.height > layout.height) {
-    return { ...size, reason: "No room here", valid: false, x, y };
+    return { ...size, reason: translateReason(t, "backpack.noRoom", "No room here"), valid: false, x, y };
   }
   if (overlapsExisting(layout, item.instanceId, x, y, size.width, size.height)) {
-    return { ...size, reason: "Slot occupied", valid: false, x, y };
+    return { ...size, reason: translateReason(t, "backpack.occupied", "Slot occupied"), valid: false, x, y };
   }
   return { ...size, valid: true, x, y };
+}
+
+function translateReason(
+  t: ReturnType<typeof useI18n>["t"] | undefined,
+  key: string,
+  fallback: string,
+): string {
+  return t ? t(key) : fallback;
 }
 
 function overlapsExisting(

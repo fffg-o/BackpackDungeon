@@ -52,10 +52,14 @@ const BASE_INPUT = Object.freeze({
 const DAILY_DUNGEON_SEED = Buffer.from("dungeon");
 const LOCATION_SEED = Buffer.from("location");
 const ENEMY_LOCATION_SEED = Buffer.from("enemy");
+const BOSS_LOCATION_SEED = Buffer.from("boss");
 const PLAYER_RUN_SEED = Buffer.from("run");
+const BOSS_SHARD_SEED = Buffer.from("boss_shard");
+const BOSS_CONTRIBUTION_SEED = Buffer.from("boss_contribution");
 const SHOP_SEED = Buffer.from("shop");
 const SHOP_ITEM_SLOT_SEED = Buffer.from("shop_slot");
 const DAILY_REWARD_CLAIM_SEED = Buffer.from("daily_claim");
+const BOSS_NFT_CLAIM_SEED = Buffer.from("boss_nft_claim");
 const DEFAULT_STARTING_GOLD = 100;
 const DEFAULT_ENEMY_CLEAR_GOLD_REWARD = 10;
 const DEFAULT_TREASURE_GOLD_REWARD = 25;
@@ -100,6 +104,14 @@ function enemyLocationPda(dayId, poiIdHash) {
   );
 }
 
+/** Derive a PDA for a boss location account. */
+function bossLocationPda(dayId, poiIdHash) {
+  return PublicKey.findProgramAddressSync(
+    [BOSS_LOCATION_SEED, Buffer.from(dayId), Buffer.from(poiIdHash)],
+    PROGRAM_ID
+  );
+}
+
 /** Derive a PDA for a player run account. */
 function playerRunPda(dayId, player) {
   return PublicKey.findProgramAddressSync(
@@ -126,12 +138,51 @@ function shopItemSlotPda(dayId, poiIdHash, slotIndex) {
   );
 }
 
+/** Derive a PDA for a boss damage shard account. */
+function bossDamageShardPda(dayId, shardIndex) {
+  const shardIndexBytes = Buffer.alloc(2);
+  shardIndexBytes.writeUInt16LE(shardIndex);
+  return PublicKey.findProgramAddressSync(
+    [BOSS_SHARD_SEED, Buffer.from(dayId), shardIndexBytes],
+    PROGRAM_ID
+  );
+}
+
+/** Derive a PDA for a player boss contribution account. */
+function playerBossContributionPda(dayId, player) {
+  return PublicKey.findProgramAddressSync(
+    [BOSS_CONTRIBUTION_SEED, Buffer.from(dayId), player.toBuffer()],
+    PROGRAM_ID
+  );
+}
+
 /** Derive a PDA for a daily reward claim account. */
 function dailyRewardClaimPda(dayId, player, poiIdHash) {
   return PublicKey.findProgramAddressSync(
     [DAILY_REWARD_CLAIM_SEED, Buffer.from(dayId), player.toBuffer(), Buffer.from(poiIdHash)],
     PROGRAM_ID
   );
+}
+
+/** Derive a PDA for a boss NFT claim account. */
+function bossNftClaimPda(dayId, player) {
+  return PublicKey.findProgramAddressSync(
+    [BOSS_NFT_CLAIM_SEED, Buffer.from(dayId), player.toBuffer()],
+    PROGRAM_ID
+  );
+}
+
+function bossShardIndexForPlayer(player, shardCount) {
+  const digest = createHash("sha256").update(player.toBuffer()).digest();
+  return digest.readUInt16LE(0) % shardCount;
+}
+
+async function fundPlayer(player) {
+  const signature = await provider.connection.requestAirdrop(
+    player.publicKey,
+    2 * solanaWeb3.LAMPORTS_PER_SOL,
+  );
+  await provider.connection.confirmTransaction(signature, "confirmed");
 }
 
 function currentShopPrice(slotAccount) {
@@ -267,6 +318,9 @@ const shopLoc = dailyMap.locations.find(
 );
 const treasureLoc = dailyMap.locations.find(
   (l) => l.kind === LocationKind.Treasure
+);
+const bossLoc = dailyMap.locations.find(
+  (l) => l.kind === LocationKind.Boss && l.boss
 );
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -631,4 +685,169 @@ test("anchor: claim daily reward adds gold once", async () => {
 
   const runAfterRejectedClaim = await program.account.playerRun.fetch(runPda);
   assert.equal(runAfterRejectedClaim.goldBalance.toString(), runAfter.goldBalance.toString());
+});
+
+test("anchor: boss damage can be submitted once per player per day", async () => {
+  assert.ok(bossLoc, "No boss location found in generated map");
+
+  const [dungeonPda] = dailyDungeonPda(DAY_ID);
+  const [runPda] = playerRunPda(DAY_ID, wallet.publicKey);
+
+  const poiIdHash = Array.from(sha256Bytes32(bossLoc.id));
+  const [locationPdaKey] = locationPda(DAY_ID, poiIdHash);
+  const [bossPdaKey] = bossLocationPda(DAY_ID, poiIdHash);
+
+  const proof = getLocationProof(dailyMap.locations, bossLoc.id);
+  const anchorProof = proof.map(toAnchorProofStep);
+  const anchorSpec = toAnchorLocationSpec(bossLoc, DAY_ID);
+
+  await program.methods
+    .initLocationFromMerkle(anchorSpec, anchorProof)
+    .accounts({
+      authority: wallet.publicKey,
+      dailyDungeon: dungeonPda,
+      locationAccount: locationPdaKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  await program.methods
+    .initBossDetail(DAY_ID, bossLoc.id, poiIdHash, anchorSpec)
+    .accounts({
+      authority: wallet.publicKey,
+      dailyDungeon: dungeonPda,
+      locationAccount: locationPdaKey,
+      bossLocation: bossPdaKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  const dungeon = await program.account.dailyDungeon.fetch(dungeonPda);
+  const shardCount = dungeon.bossShardCount;
+  const shardIndex = bossShardIndexForPlayer(wallet.publicKey, shardCount);
+  const [shardPdaKey] = bossDamageShardPda(DAY_ID, shardIndex);
+  const [contributionPdaKey] = playerBossContributionPda(DAY_ID, wallet.publicKey);
+
+  await program.methods
+    .initBossDamageShard(DAY_ID, poiIdHash, shardIndex)
+    .accounts({
+      dailyDungeon: dungeonPda,
+      locationAccount: locationPdaKey,
+      bossLocation: bossPdaKey,
+      bossDamageShard: shardPdaKey,
+      payer: wallet.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  const battleHash = new Uint8Array(32).fill(7);
+  const firstDamage = 5;
+
+  await program.methods
+    .submitBossDamage(new BN(firstDamage), Array.from(battleHash), shardIndex, null)
+    .accounts({
+      player: wallet.publicKey,
+      dailyDungeon: dungeonPda,
+      playerRun: runPda,
+      locationAccount: locationPdaKey,
+      bossLocation: bossPdaKey,
+      bossDamageShard: shardPdaKey,
+      playerBossContribution: contributionPdaKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  const contribution = await program.account.playerBossContribution.fetch(contributionPdaKey);
+  assert.equal(contribution.totalDamage.toString(), String(firstDamage));
+  assert.ok(BigInt(contribution.totalDamage.toString()) > 0n);
+
+  await assert.rejects(
+    () => program.methods
+      .submitBossDamage(new BN(3), Array.from(battleHash), shardIndex, null)
+      .accounts({
+        player: wallet.publicKey,
+        dailyDungeon: dungeonPda,
+        playerRun: runPda,
+        locationAccount: locationPdaKey,
+        bossLocation: bossPdaKey,
+        bossDamageShard: shardPdaKey,
+        playerBossContribution: contributionPdaKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc(),
+    (error) => {
+      assert.match(anchorErrorText(error), /BossAlreadyChallenged|already challenged/i);
+      return true;
+    }
+  );
+
+  const [bossNftClaimPdaKey] = bossNftClaimPda(DAY_ID, wallet.publicKey);
+  await program.methods
+    .claimBossParticipationNft()
+    .accounts({
+      player: wallet.publicKey,
+      dailyDungeon: dungeonPda,
+      bossLocation: bossPdaKey,
+      locationAccount: locationPdaKey,
+      playerBossContribution: contributionPdaKey,
+      bossDamageShard: shardPdaKey,
+      bossNftClaim: bossNftClaimPdaKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+
+  const bossClaim = await program.account.bossNftClaim.fetch(bossNftClaimPdaKey);
+  assert.equal(bossClaim.player.equals(wallet.publicKey), true);
+  assert.equal(bossClaim.playerDamage.toString(), String(firstDamage));
+
+  const otherPlayer = Keypair.generate();
+  await fundPlayer(otherPlayer);
+  const [otherRunPda] = playerRunPda(DAY_ID, otherPlayer.publicKey);
+  await program.methods
+    .enterDungeon(DAY_ID)
+    .accounts({
+      player: otherPlayer.publicKey,
+      dailyDungeon: dungeonPda,
+      playerRun: otherRunPda,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([otherPlayer])
+    .rpc();
+
+  const otherShardIndex = bossShardIndexForPlayer(otherPlayer.publicKey, shardCount);
+  const [otherShardPdaKey] = bossDamageShardPda(DAY_ID, otherShardIndex);
+  const otherShard = await program.account.bossDamageShard.fetchNullable(otherShardPdaKey);
+  if (!otherShard) {
+    await program.methods
+      .initBossDamageShard(DAY_ID, poiIdHash, otherShardIndex)
+      .accounts({
+        dailyDungeon: dungeonPda,
+        locationAccount: locationPdaKey,
+        bossLocation: bossPdaKey,
+        bossDamageShard: otherShardPdaKey,
+        payer: otherPlayer.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([otherPlayer])
+      .rpc();
+  }
+
+  const [otherContributionPdaKey] = playerBossContributionPda(DAY_ID, otherPlayer.publicKey);
+  await program.methods
+    .submitBossDamage(new BN(4), Array.from(battleHash), otherShardIndex, null)
+    .accounts({
+      player: otherPlayer.publicKey,
+      dailyDungeon: dungeonPda,
+      playerRun: otherRunPda,
+      locationAccount: locationPdaKey,
+      bossLocation: bossPdaKey,
+      bossDamageShard: otherShardPdaKey,
+      playerBossContribution: otherContributionPdaKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([otherPlayer])
+    .rpc();
+
+  const otherContribution = await program.account.playerBossContribution.fetch(otherContributionPdaKey);
+  assert.equal(otherContribution.totalDamage.toString(), "4");
 });

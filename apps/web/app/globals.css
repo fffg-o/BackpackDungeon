@@ -48,6 +48,7 @@ p {
 /* Navigation */
 .nav {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding: 12px 24px;
   background: #121416;
@@ -67,4 +68,26 @@ p {
 .navLink:hover {
   color: #f2f4f6;
   background: #1a1e22;
+}
+
+.languageToggle {
+  margin-left: auto;
+  color: #f2f4f6;
+  background: #1a1e22;
+  border: 1px solid #2a3036;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.languageToggle:hover {
+  background: #22282e;
+  border-color: #3a424a;
 }

@@ -1,6 +1,9 @@
+"use client";
+
 import type { RefObject } from "react";
 import type { BattleResultV1 } from "@backpack-dungeon/game-core";
 import type { BattleOverlayPhase } from "./BattleOverlay";
+import { useI18n } from "../../../i18n/useI18n";
 import styles from "./battle.module.css";
 
 export interface BattleResultSummaryProps {
@@ -38,6 +41,7 @@ export function BattleResultSummary({
   bossPlayerTotalDamageAfterSubmit,
   bossNftEligible,
 }: BattleResultSummaryProps) {
+  const { t } = useI18n();
   const result = phaseHasResult(phase) ? phase.result : null;
 
   return (
@@ -66,6 +70,7 @@ export function BattleResultSummary({
         startDisabled,
         startLabel,
         submitLabel,
+        t,
         txPending,
       })}
     </div>
@@ -85,41 +90,42 @@ function ResultStats({
   readonly bossPlayerTotalDamageAfterSubmit?: number;
   readonly bossNftEligible?: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <div className={styles.receipt}>
       <div className={styles.resultGrid}>
         <ResultStat
-          label="Outcome"
-          value={encounterKind === "boss" ? "Raid Damage" : result.won ? "Victory" : "Defeated"}
+          label={t("battle.outcome")}
+          value={encounterKind === "boss" ? t("battle.raidDamage") : result.won ? t("common.victory") : t("common.defeated")}
         />
-        <ResultStat label="Damage Dealt" value={result.playerDamageDealt} />
-        <ResultStat label="Damage Taken" value={result.damageTaken} />
-        <ResultStat label="Turns" value={result.turnsTaken} />
-        <ResultStat label="Score" value={result.score} />
-        <ResultStat label="Boss Damage Score" value={result.bossDamageScore} />
+        <ResultStat label={t("battle.damageDealt")} value={result.playerDamageDealt} />
+        <ResultStat label={t("battle.damageTaken")} value={result.damageTaken} />
+        <ResultStat label={t("battle.turns")} value={result.turnsTaken} />
+        <ResultStat label={t("battle.score")} value={result.score} />
+        <ResultStat label={t("battle.bossDamageScore")} value={result.bossDamageScore} />
         {encounterKind === "boss" && (
           <>
-            <ResultStat label="Damage Score" value={result.bossDamageScore} />
-            <ResultStat label="Shard Index" value={bossShardIndex ?? "Unknown"} />
+            <ResultStat label={t("battle.damageScore")} value={result.bossDamageScore} />
+            <ResultStat label={t("battle.shardIndex")} value={bossShardIndex ?? t("common.unknown")} />
             <ResultStat
-              label="Player Total Damage after submit"
-              value={bossPlayerTotalDamageAfterSubmit ?? "Pending submit"}
+              label={t("battle.playerTotalAfterSubmit")}
+              value={bossPlayerTotalDamageAfterSubmit ?? t("battle.pendingSubmit")}
             />
             <ResultStat
-              label="Claim Boss NFT eligibility"
-              value={bossNftEligible ? "Eligible" : "Needs damage"}
+              label={t("battle.bossNftEligibility")}
+              value={bossNftEligible ? t("common.eligible") : t("battle.needsDamage")}
             />
           </>
         )}
       </div>
       <div className={styles.hashGrid}>
-        <HashStat label="Backpack Hash" value={result.backpackHash} />
-        <HashStat label="Input Hash" value={result.inputHash} />
-        <HashStat label="Result Hash" value={result.resultHash} />
-        <HashStat label="Proof Hash" value={result.proofHash} />
+        <HashStat label={t("battle.backpackHash")} value={result.backpackHash} />
+        <HashStat label={t("battle.inputHash")} value={result.inputHash} />
+        <HashStat label={t("battle.resultHash")} value={result.resultHash} />
+        <HashStat label={t("battle.proofHash")} value={result.proofHash} />
       </div>
       <p className={styles.receiptNotice}>
-        This MVP records hashes on-chain. Battle simulation is still client-reported.
+        {t("battle.mvpNotice")}
       </p>
     </div>
   );
@@ -147,11 +153,12 @@ function HashStat({
   readonly label: string;
   readonly value: string | undefined;
 }) {
+  const { t } = useI18n();
   return (
     <div className={styles.hashStat}>
       <span className={styles.resultLabel}>{label}</span>
-      <span className={styles.hashValue} title={value ? prefixedHash(value) : "Not captured"}>
-        {shortHash(value)}
+      <span className={styles.hashValue} title={value ? prefixedHash(value) : t("common.notCaptured")}>
+        {shortHash(value, t("common.notCaptured"))}
       </span>
       {value && (
         <button
@@ -160,9 +167,9 @@ function HashStat({
           onClick={() => {
             void copyHash(value);
           }}
-          aria-label={`Copy ${label}`}
+          aria-label={t("battle.copiedHash", { label })}
         >
-          Copy
+          {t("common.copy")}
         </button>
       )}
     </div>
@@ -170,13 +177,14 @@ function HashStat({
 }
 
 function BackpackEffectsSummary({ result }: { readonly result: BattleResultV1 }) {
+  const { t } = useI18n();
   const triggers = aggregateItemTriggers(result);
 
   return (
-    <section className={styles.effectsSummary} aria-label="Backpack effects">
-      <h4 className={styles.summaryTitle}>Backpack Effects</h4>
+    <section className={styles.effectsSummary} aria-label={t("battle.effects")}>
+      <h4 className={styles.summaryTitle}>{t("battle.effects")}</h4>
       {triggers.length === 0 ? (
-        <p className={styles.emptySummaryText}>No backpack triggers logged.</p>
+        <p className={styles.emptySummaryText}>{t("battle.noTriggers")}</p>
       ) : (
         <div className={styles.effectReceiptList}>
           {triggers.map((trigger) => (
@@ -192,14 +200,11 @@ function BackpackEffectsSummary({ result }: { readonly result: BattleResultV1 })
 }
 
 function ReceiptDetails() {
+  const { t } = useI18n();
   return (
     <details className={styles.receiptDetails}>
-      <summary>Why this matters?</summary>
-      <p>
-        backpackHash represents the current backpack layout. resultHash represents the battle
-        summary. proofHash represents the full replay log. These hashes are anchors for future
-        verification.
-      </p>
+      <summary>{t("battle.whyMatters")}</summary>
+      <p>{t("battle.whyMattersBody")}</p>
     </details>
   );
 }
@@ -218,6 +223,7 @@ function renderActions(params: {
   readonly onRetry: () => void;
   readonly explorerUrl?: (signature: string) => string;
   readonly shortSignature?: (signature: string) => string;
+  readonly t: ReturnType<typeof useI18n>["t"];
 }) {
   const {
     encounterKind,
@@ -232,6 +238,7 @@ function renderActions(params: {
     startDisabled,
     startLabel,
     submitLabel,
+    t,
     txPending,
   } = params;
 
@@ -256,7 +263,7 @@ function renderActions(params: {
       <div className={styles.statusBox}>
         <div className={styles.submittingRow}>
           <span className={styles.spinner} />
-          <span>{phase.phase === "preparing" ? "Preparing auto battle." : "Auto battle running."}</span>
+          <span>{phase.phase === "preparing" ? t("battle.preparingAuto") : t("battle.autoRunning")}</span>
         </div>
       </div>
     );
@@ -267,10 +274,10 @@ function renderActions(params: {
       return (
         <div className={styles.buttonStack}>
           <button type="button" className={styles.secondaryButton} onClick={onRetry} disabled={txPending}>
-            Rearrange Backpack
+            {t("battle.rearrangeBackpack")}
           </button>
           <button type="button" className={styles.primaryButton} onClick={onStart} disabled={txPending}>
-            Retry
+            {t("common.retry")}
           </button>
         </div>
       );
@@ -289,7 +296,7 @@ function renderActions(params: {
           {submitLabel}
         </button>
         <button type="button" className={styles.secondaryButton} onClick={onRetry} disabled={txPending}>
-          Back to Setup
+          {t("battle.backToSetup")}
         </button>
       </div>
     );
@@ -300,7 +307,7 @@ function renderActions(params: {
       <div className={styles.statusBox}>
         <div className={styles.submittingRow}>
           <span className={styles.spinner} />
-          <span>{encounterKind === "boss" ? "Submitting boss damage." : "Submitting clear."}</span>
+          <span>{encounterKind === "boss" ? t("battle.submittingBossDamage") : t("battle.submittingClear")}</span>
         </div>
       </div>
     );
@@ -313,8 +320,8 @@ function renderActions(params: {
     return (
       <div className={styles.statusBox}>
         <div className={styles.successReceipt}>
-          <span>Submitted battle receipt.</span>
-          <span className={styles.resultLabel}>tx signature</span>
+          <span>{t("battle.submittedReceipt")}</span>
+          <span className={styles.resultLabel}>{t("battle.txSignature")}</span>
           {explorerUrl ? (
             <a
               className={styles.signature}
@@ -334,11 +341,11 @@ function renderActions(params: {
               target="_blank"
               rel="noreferrer"
             >
-              Explorer link
+              {t("battle.explorerLink")}
             </a>
           )}
-          <HashStat label="Submitted battle result hash" value={resultHash} />
-          <HashStat label="Submitted proof hash" value={proofHash} />
+          <HashStat label={t("battle.submittedResultHash")} value={resultHash} />
+          <HashStat label={t("battle.submittedProofHash")} value={proofHash} />
         </div>
       </div>
     );
@@ -350,10 +357,10 @@ function renderActions(params: {
         <span>{phase.message}</span>
         <div className={styles.buttonStack} style={{ marginTop: 10 }}>
           <button type="button" className={styles.primaryButton} onClick={onSubmit} disabled={txPending}>
-            Retry Submit
+            {t("battle.retrySubmit")}
           </button>
           <button type="button" className={styles.secondaryButton} onClick={onRetry}>
-            Back to Setup
+            {t("battle.backToSetup")}
           </button>
         </div>
       </div>
@@ -384,8 +391,8 @@ function aggregateItemTriggers(
     .map(([text, count]) => ({ count, text }));
 }
 
-function shortHash(value: string | undefined): string {
-  if (!value) return "Not captured";
+function shortHash(value: string | undefined, emptyLabel: string): string {
+  if (!value) return emptyLabel;
   const normalized = prefixedHash(value);
   if (normalized.length <= 14) return normalized;
   return `${normalized.slice(0, 6)}...${normalized.slice(-4)}`;

@@ -38,7 +38,7 @@ pub const DEFAULT_VALUABLE_CLEAR_CAP: u16 = 5;
 pub const DEFAULT_RARE_ELIGIBILITY_POINTS_PER_CLEAR: u32 = 1;
 pub const MAX_MERKLE_PROOF_LEN: usize = 32;
 pub const MAX_BOSS_DAMAGE_PER_SUBMISSION: u64 = 10_000;
-pub const MAX_BOSS_SUBMISSIONS_PER_PLAYER: u16 = 10;
+pub const MAX_BOSS_SUBMISSIONS_PER_PLAYER: u16 = 1;
 pub const MINIMUM_BOSS_DAMAGE: u64 = 1;
 
 /// Basis points denominator (100% = 10_000 bps).
@@ -549,6 +549,7 @@ pub mod packrun {
             total_damage: ctx.accounts.boss_damage_shard.total_damage,
             participant_count: ctx.accounts.boss_damage_shard.participant_count,
             player_total_damage: ctx.accounts.player_boss_contribution.total_damage,
+            challenge_count: 1,
         });
 
         Ok(())
@@ -1261,6 +1262,7 @@ pub struct BossDamageSubmitted {
     pub total_damage: u64,
     pub participant_count: u32,
     pub player_total_damage: u64,
+    pub challenge_count: u16,
 }
 
 #[event]
@@ -1764,7 +1766,7 @@ fn validate_submit_boss_damage(
     location: &LocationAccount,
     player_run: &PlayerRun,
     boss_damage_shard: &BossDamageShard,
-    _player_boss_contribution: &PlayerBossContribution,
+    player_boss_contribution: &PlayerBossContribution,
     player_pubkey: Pubkey,
     boss_location_key: Pubkey,
     boss_shard_count: u16,
@@ -1805,15 +1807,9 @@ fn validate_submit_boss_damage(
         PackrunError::InvalidBossDamageShard
     );
 
-    // Check player has not exceeded boss submission limit.
-    // Uses player_run.boss_damage as a proxy for number of submissions made.
-    let estimated_submissions = player_run
-        .boss_damage
-        .checked_div(MAX_BOSS_DAMAGE_PER_SUBMISSION)
-        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
     require!(
-        (estimated_submissions as u16) < MAX_BOSS_SUBMISSIONS_PER_PLAYER,
-        PackrunError::BossSubmissionLimitExceeded
+        player_boss_contribution.total_damage == 0 && player_run.boss_damage == 0,
+        PackrunError::BossAlreadyChallenged
     );
 
     Ok(())
@@ -1851,10 +1847,7 @@ fn apply_submit_boss_damage(
         contribution.bump = bump;
     }
 
-    contribution.total_damage = contribution
-        .total_damage
-        .checked_add(damage_score)
-        .ok_or(error!(PackrunError::ArithmeticOverflow))?;
+    contribution.total_damage = damage_score;
     contribution.last_hit_at = now;
 
     // Update player run
@@ -2589,6 +2582,8 @@ pub enum PackrunError {
     ShardIndexMismatch,
     #[msg("player has exceeded the boss submission limit for this daily dungeon.")]
     BossSubmissionLimitExceeded,
+    #[msg("player has already challenged the boss for this daily dungeon.")]
+    BossAlreadyChallenged,
     #[msg("location is not a boss location.")]
     LocationIsNotBoss,
     #[msg("boss damage shard account is invalid.")]
@@ -3391,17 +3386,15 @@ mod tests {
     }
 
     #[test]
-    fn submit_boss_damage_fails_when_submission_limit_exceeded() {
+    fn submit_boss_damage_fails_when_contribution_already_exists() {
         let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
         let location = test_boss_location_account();
-        let mut player_run = test_player_run();
-        // Simulate MAX_BOSS_SUBMISSIONS_PER_PLAYER submissions already made
-        player_run.boss_damage =
-            MAX_BOSS_DAMAGE_PER_SUBMISSION * MAX_BOSS_SUBMISSIONS_PER_PLAYER as u64;
+        let player_run = test_player_run();
         let shard = test_boss_damage_shard(0);
-        let contribution = test_boss_contribution();
+        let mut contribution = test_boss_contribution();
+        contribution.total_damage = 500;
 
-        assert!(validate_submit_boss_damage(
+        let err = validate_submit_boss_damage(
             &dungeon,
             &location,
             &player_run,
@@ -3413,7 +3406,33 @@ mod tests {
             500,
             1_500,
         )
-        .is_err());
+        .unwrap_err();
+        assert_error_contains(err, "BossAlreadyChallenged");
+    }
+
+    #[test]
+    fn submit_boss_damage_fails_when_player_run_already_has_boss_damage() {
+        let dungeon = test_dungeon(DungeonStatus::Open, 1_000, 2_000);
+        let location = test_boss_location_account();
+        let mut player_run = test_player_run();
+        player_run.boss_damage = 500;
+        let shard = test_boss_damage_shard(0);
+        let contribution = test_boss_contribution();
+
+        let err = validate_submit_boss_damage(
+            &dungeon,
+            &location,
+            &player_run,
+            &shard,
+            &contribution,
+            Pubkey::default(),
+            Pubkey::default(),
+            8,
+            500,
+            1_500,
+        )
+        .unwrap_err();
+        assert_error_contains(err, "BossAlreadyChallenged");
     }
 
     #[test]
@@ -3443,43 +3462,6 @@ mod tests {
         assert_eq!(outcome.shard_total_damage, damage_score);
         assert_eq!(outcome.participant_count, 1);
         assert_eq!(outcome.player_total_damage, damage_score);
-    }
-
-    #[test]
-    fn submit_boss_damage_accumulates_damage_on_second_submission() {
-        let mut shard = test_boss_damage_shard(0);
-        let mut contribution = test_boss_contribution();
-        let mut player_run = test_player_run();
-        let now = 1_500;
-
-        // First submission
-        apply_submit_boss_damage(
-            &mut shard,
-            &mut contribution,
-            &mut player_run,
-            500,
-            now,
-            246,
-        )
-        .unwrap();
-
-        // Second submission
-        let outcome = apply_submit_boss_damage(
-            &mut shard,
-            &mut contribution,
-            &mut player_run,
-            300,
-            now + 100,
-            246,
-        )
-        .unwrap();
-
-        assert_eq!(shard.total_damage, 800);
-        assert_eq!(shard.participant_count, 1); // still 1 participant
-        assert_eq!(contribution.total_damage, 800);
-        assert_eq!(contribution.last_hit_at, now + 100);
-        assert_eq!(player_run.boss_damage, 800);
-        assert!(!outcome.is_first_participation);
     }
 
     #[test]
@@ -3930,6 +3912,14 @@ mod tests {
             last_hit_at: 0,
             bump: 246,
         }
+    }
+
+    fn assert_error_contains(err: anchor_lang::error::Error, expected: &str) {
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains(expected),
+            "expected error to contain {expected}, got {rendered}"
+        );
     }
 
     // ── claim_daily_reward tests ─────────────────────────────────────────────

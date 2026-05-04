@@ -1,9 +1,12 @@
+"use client";
+
 import {
   getBackpackItemDefinition,
   type BackpackItemInstanceV1,
   type BackpackLayoutV1,
 } from "@backpack-dungeon/game-core";
 import { BackpackItemTile } from "./BackpackItemTile";
+import { useI18n } from "../../../i18n/useI18n";
 import styles from "./battle.module.css";
 
 export interface InventoryDrawerProps {
@@ -25,32 +28,33 @@ export function InventoryDrawer({
   onSelectItem,
   onDragStartItem,
 }: InventoryDrawerProps) {
+  const { t } = useI18n();
   const placedIds = new Set(layout.placedItems.map((item) => item.instanceId));
   const placedItems = inventory.filter((item) => placedIds.has(item.instanceId));
 
   return (
     <div className={styles.inventoryDrawer}>
       <InventoryGroup
-        title="Equipped / Placed"
+        title={t("backpack.equippedPlaced")}
         items={placedItems}
         placedIds={placedIds}
         selectedInstanceId={selectedInstanceId}
         rotatedByInstanceId={rotatedByInstanceId}
         onSelectItem={onSelectItem}
         onDragStartItem={onDragStartItem}
-        emptyText="No items placed."
+        emptyText={t("backpack.noPlaced")}
       />
       <InventoryGroup
-        title="Inventory / Unplaced"
+        title={t("backpack.inventoryUnplaced")}
         items={inventory}
         placedIds={placedIds}
         selectedInstanceId={selectedInstanceId}
         rotatedByInstanceId={rotatedByInstanceId}
         onSelectItem={onSelectItem}
         onDragStartItem={onDragStartItem}
-        emptyText="No items in inventory."
+        emptyText={t("backpack.noInventory")}
       />
-      {backpackFull && <div className={styles.backpackWarning}>Backpack full. Make room before placing more.</div>}
+      {backpackFull && <div className={styles.backpackWarning}>{t("backpack.full")}</div>}
     </div>
   );
 }

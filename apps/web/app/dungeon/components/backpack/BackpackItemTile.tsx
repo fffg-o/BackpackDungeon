@@ -6,6 +6,7 @@ import type {
   BackpackItemInstanceV1,
 } from "@backpack-dungeon/game-core";
 import { ItemNameTooltip } from "./ItemNameTooltip";
+import { useI18n } from "../../../i18n/useI18n";
 import styles from "./backpack.module.css";
 
 export interface BackpackItemTileProps {
@@ -34,6 +35,7 @@ export function BackpackItemTile({
   onSelect,
   onDragStart,
 }: BackpackItemTileProps) {
+  const { t } = useI18n();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState<TooltipPosition | null>(null);
 
@@ -75,7 +77,7 @@ export function BackpackItemTile({
         onFocus={showTooltipFromAnchor}
         onBlur={() => setTooltipPosition(null)}
         title={definition.name}
-        aria-label={`${definition.name}${placed ? ", placed" : ""}${rotated ? ", rotated" : ""}`}
+        aria-label={`${definition.name}${placed ? `, ${t("backpack.placed")}` : ""}${rotated ? `, ${t("backpack.rotated")}` : ""}`}
       >
         <span className={styles.itemTileIcon} aria-hidden="true">
           {iconLabel(definition)}

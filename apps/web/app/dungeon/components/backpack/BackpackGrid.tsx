@@ -9,6 +9,7 @@ import {
   type PlacedBackpackItemV1,
 } from "@backpack-dungeon/game-core";
 import { BackpackItemTile } from "./BackpackItemTile";
+import { useI18n } from "../../../i18n/useI18n";
 import styles from "./backpack.module.css";
 
 export interface BackpackPlacementPreview {
@@ -49,6 +50,7 @@ export function BackpackGrid({
   onSelectItem,
   onDragStartItem,
 }: BackpackGridProps) {
+  const { t } = useI18n();
   const cells = Array.from({ length: layout.width * layout.height }, (_, index) => ({
     x: index % layout.width,
     y: Math.floor(index / layout.width),
@@ -69,6 +71,8 @@ export function BackpackGrid({
             x={cell.x}
             y={cell.y}
             preview={previewStateForCell(cell.x, cell.y, preview)}
+            cellLabel={t("backpack.cellTitle", { x: cell.x, y: cell.y })}
+            cellAriaLabel={t("backpack.cellAria", { x: cell.x, y: cell.y })}
             onClick={onCellClick}
             onHover={onCellHover}
             onLeave={onCellLeave}
@@ -88,7 +92,7 @@ export function BackpackGrid({
         ))}
       </div>
       <div className={styles.backpackFeedback} aria-live="polite">
-        {feedback ?? (preview?.reason && !preview.valid ? preview.reason : "Arrange backpack items.")}
+        {feedback ?? (preview?.reason && !preview.valid ? preview.reason : t("backpack.arranged"))}
       </div>
     </div>
   );
@@ -98,6 +102,8 @@ function BackpackCell({
   x,
   y,
   preview,
+  cellLabel,
+  cellAriaLabel,
   onClick,
   onHover,
   onLeave,
@@ -106,6 +112,8 @@ function BackpackCell({
   readonly x: number;
   readonly y: number;
   readonly preview: BackpackCellPreviewState;
+  readonly cellLabel: string;
+  readonly cellAriaLabel: string;
   readonly onClick: (x: number, y: number) => void;
   readonly onHover: (x: number, y: number) => void;
   readonly onLeave: () => void;
@@ -137,8 +145,8 @@ function BackpackCell({
         event.preventDefault();
         onDropItem(x, y, event.dataTransfer.getData("text/plain") || null);
       }}
-      title={`Cell ${x},${y}`}
-      aria-label={`Backpack cell ${x},${y}`}
+      title={cellLabel}
+      aria-label={cellAriaLabel}
     >
       <span className={styles.cellCoordinate}>{x},{y}</span>
     </button>

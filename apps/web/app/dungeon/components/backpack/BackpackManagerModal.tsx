@@ -10,6 +10,7 @@ import { BackpackGrid } from "./BackpackGrid";
 import { BackpackToolbar } from "./BackpackToolbar";
 import { InventoryList } from "./InventoryList";
 import { useBackpackBuilder } from "./useBackpackBuilder";
+import { useI18n } from "../../../i18n/useI18n";
 import styles from "./backpack.module.css";
 
 export interface BackpackManagerModalProps {
@@ -35,6 +36,7 @@ export function BackpackManagerModal({
   onAutoPack,
   onResetBackpack,
 }: BackpackManagerModalProps) {
+  const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const builder = useBackpackBuilder({
@@ -93,20 +95,20 @@ export function BackpackManagerModal({
       >
         <header className={styles.managerHeader}>
           <div className={styles.managerTitleBlock}>
-            <p className={styles.managerEyebrow}>Inventory</p>
+            <p className={styles.managerEyebrow}>{t("backpack.inventory")}</p>
             <h2 id="backpack-manager-title" className={styles.managerTitle}>
-              Backpack / 背包
+              {t("backpack.managerTitle")}
             </h2>
           </div>
           <div className={styles.managerMeta}>
-            <span className={styles.managerMetaPill}>{inventory.length} items</span>
-            <span className={styles.managerMetaPill}>Hash {shortHash(backpackSnapshot.backpackHash)}</span>
+            <span className={styles.managerMetaPill}>{t("backpack.items", { count: inventory.length })}</span>
+            <span className={styles.managerMetaPill}>{t("backpack.hash", { hash: shortHash(backpackSnapshot.backpackHash) })}</span>
             <button
               ref={closeButtonRef}
               type="button"
               className={styles.managerCloseButton}
               onClick={handleClose}
-              aria-label="Close backpack manager"
+              aria-label={t("backpack.closeManager")}
             >
               X
             </button>
@@ -121,7 +123,7 @@ export function BackpackManagerModal({
           />
         </div>
         <div className={styles.managerContent}>
-          <section className={styles.managerPanel} aria-label="Backpack grid">
+          <section className={styles.managerPanel} aria-label={t("backpack.grid")}>
             <BackpackGrid
               layout={layout}
               inventory={inventory}
@@ -136,20 +138,20 @@ export function BackpackManagerModal({
               onDragStartItem={(item) => builder.selectItem(item.instanceId)}
             />
           </section>
-          <aside className={styles.managerInventoryPanel} aria-label="Unplaced backpack items">
+          <aside className={styles.managerInventoryPanel} aria-label={t("backpack.unplacedAria")}>
             <InventoryList
-              title="Unplaced Items"
+              title={t("backpack.unplacedItems")}
               inventory={inventory}
               layout={layout}
               selectedInstanceId={builder.selectedInstanceId}
               rotatedByInstanceId={builder.rotatedByInstanceId}
               mode="unplaced"
-              emptyText="All items are packed."
+              emptyText={t("backpack.allPacked")}
               onSelectItem={builder.selectItem}
               onDragStartItem={(item) => builder.selectItem(item.instanceId)}
             />
             {builder.backpackFull && (
-              <div className={styles.backpackWarning}>Backpack full. Make room before placing more.</div>
+              <div className={styles.backpackWarning}>{t("backpack.full")}</div>
             )}
           </aside>
         </div>

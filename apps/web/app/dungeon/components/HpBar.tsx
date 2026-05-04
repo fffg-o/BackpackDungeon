@@ -1,3 +1,6 @@
+"use client";
+
+import { useI18n } from "../../i18n/useI18n";
 import styles from "../dungeon.module.css";
 
 export interface HpBarProps {
@@ -8,6 +11,7 @@ export interface HpBarProps {
 }
 
 export function HpBar({ current, max, label, variant }: HpBarProps) {
+  const { t } = useI18n();
   const safeMax = Math.max(1, max);
   const safeCurrent = Math.max(0, Math.min(current, safeMax));
   const percent = Math.floor((safeCurrent * 100) / safeMax);
@@ -23,7 +27,7 @@ export function HpBar({ current, max, label, variant }: HpBarProps) {
       <div className={styles.hpMeta}>
         <span className={styles.metaLabel}>{label}</span>
         <span className={styles.metaValue}>
-          {safeCurrent <= 0 ? "Defeated" : `${safeCurrent} / ${safeMax}`}
+          {safeCurrent <= 0 ? t("common.defeated") : `${safeCurrent} / ${safeMax}`}
         </span>
       </div>
       <div className={`${styles.hpBar} ${styles[`hpBar${capitalizeVariant(variant)}`]}`}>

@@ -8,6 +8,7 @@ import { BattleOverlay, type BattleOverlayPhase } from "./components/battle/Batt
 import { BackpackManagerModal } from "./components/backpack/BackpackManagerModal";
 import { StatPill } from "./components/StatPill";
 import { useBackpackInventory } from "./hooks/useBackpackInventory";
+import { useI18n } from "../i18n/useI18n";
 import {
   buildBattleInput,
   buildLocationMerkleTree,
@@ -156,8 +157,8 @@ const POI_COLORS: Record<LocationKindType, string> = {
   [LocationKind.Event]: "#95a5a6",
 };
 
-function formatCooldown(seconds: number): string {
-  if (seconds <= 0) return "Ready";
+function formatCooldown(seconds: number, readyLabel = "Ready"): string {
+  if (seconds <= 0) return readyLabel;
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}m ${s}s`;
@@ -196,9 +197,9 @@ function explorerTxUrl(signature: string): string {
   return `https://explorer.solana.com/tx/${signature}?cluster=${EXPLORER_CLUSTER}`;
 }
 
-function formatNextAvailable(nextAvailableAt: number | undefined): string {
-  if (!nextAvailableAt || nextAvailableAt <= 0) return "Ready";
-  if (nextAvailableAt <= Math.floor(Date.now() / 1000)) return "Ready";
+function formatNextAvailable(nextAvailableAt: number | undefined, readyLabel = "Ready"): string {
+  if (!nextAvailableAt || nextAvailableAt <= 0) return readyLabel;
+  if (nextAvailableAt <= Math.floor(Date.now() / 1000)) return readyLabel;
 
   return new Date(nextAvailableAt * 1000).toLocaleTimeString([], {
     hour: "2-digit",
@@ -207,8 +208,8 @@ function formatNextAvailable(nextAvailableAt: number | undefined): string {
   });
 }
 
-function formatDurationSeconds(totalSeconds: number | undefined): string {
-  if (!totalSeconds || totalSeconds <= 0) return "Not scheduled";
+function formatDurationSeconds(totalSeconds: number | undefined, notScheduledLabel = "Not scheduled"): string {
+  if (!totalSeconds || totalSeconds <= 0) return notScheduledLabel;
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = Math.floor(totalSeconds % 60);
@@ -263,18 +264,22 @@ function itemEffectSummary(definition: BackpackItemDefinitionV1): string {
   return definition.effects.map((effect) => effect.description).join(" ");
 }
 
-function shopRestockInfo(stockInfo: NonNullable<PoiOnChainState["stock"]>[number] | undefined): string {
-  if (!stockInfo?.initialized) return "Initialize slot to sync restock.";
+function shopRestockInfo(
+  stockInfo: NonNullable<PoiOnChainState["stock"]>[number] | undefined,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  if (!stockInfo?.initialized) return t("shop.restockUninitialized");
   const epoch = stockInfo.restockEpoch ?? 0;
-  const interval = formatDurationSeconds(stockInfo.restockIntervalSeconds);
-  return `Restock epoch ${epoch}; interval ${interval}.`;
+  const interval = formatDurationSeconds(stockInfo.restockIntervalSeconds, t("common.notScheduled"));
+  return t("shop.restockInfo", { epoch, interval });
 }
 
 function shopStockLabel(
   stockInfo: NonNullable<PoiOnChainState["stock"]>[number] | undefined,
   fallbackStock: number,
+  t: ReturnType<typeof useI18n>["t"],
 ): string {
-  if (!stockInfo?.initialized) return `${fallbackStock} base`;
+  if (!stockInfo?.initialized) return t("shop.baseStock", { stock: fallbackStock });
   const available = stockInfo.availableStock ?? stockInfo.available ?? 0;
   const maxStock = stockInfo.maxStock ?? fallbackStock;
   return `${available} / ${maxStock}`;
@@ -288,6 +293,17 @@ function shopTileStock(onChain: PoiOnChainState | null): string | null {
     0,
   );
   return `${stockEntries.length}/${available}`;
+}
+
+function locationKindLabel(
+  kind: LocationKindType,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  if (kind === LocationKind.Enemy) return t("dungeon.labels.enemy");
+  if (kind === LocationKind.Shop) return t("dungeon.labels.shop");
+  if (kind === LocationKind.Treasure) return t("dungeon.labels.treasure");
+  if (kind === LocationKind.Boss) return t("dungeon.labels.boss");
+  return t("dungeon.labels.event");
 }
 
 function shopTxKey(kind: "initShopSlot" | "buyItem", slotIndex: number): TxPending {
@@ -432,6 +448,7 @@ function clampBps(value: number): number {
 }
 
 export default function DailyDungeonPage() {
+  const { t } = useI18n();
   const wallet = useWallet();
   const anchorWallet = useAnchorWallet();
   const publicKey = wallet.publicKey;
@@ -567,17 +584,17 @@ export default function DailyDungeonPage() {
       setDailyDungeon(dungeon);
       setChainError((current) => {
         if (dungeon) return current?.startsWith("DailyDungeon account not found") ? null : current;
-        return `DailyDungeon account not found for ${map.dayId}. Ask the admin/crank to initialize today's dungeon.`;
+        return t("dungeon.errors.dailyDungeonMissing", { dayId: map.dayId });
       });
     } catch (error) {
-      setDungeonError(formatError(error, "Failed to fetch daily dungeon."));
-      setChainError(formatError(error, "Failed to fetch DailyDungeon."));
+      setDungeonError(formatError(error, t("dungeon.errors.fetchDailyDungeon")));
+      setChainError(formatError(error, t("dungeon.errors.fetchDailyDungeonAccount")));
       setDailyDungeon(null);
     } finally {
       setDungeonLoading(false);
       setLoadingChainState(false);
     }
-  }, [program, map.dayId]);
+  }, [program, map.dayId, t]);
 
   const refreshPlayerRun = useCallback(async (): Promise<PlayerRunState | null> => {
     if (!publicKey) {
@@ -592,13 +609,13 @@ export default function DailyDungeonPage() {
       setPlayerRun(nextPlayerRun);
       return nextPlayerRun;
     } catch (error) {
-      setChainError(formatError(error, "Failed to fetch PlayerRun."));
+      setChainError(formatError(error, t("dungeon.errors.fetchPlayerRun")));
       return null;
     } finally {
       setPlayerRunLoading(false);
       setLoadingChainState(false);
     }
-  }, [program, map.dayId, publicKey, publicKeyString]);
+  }, [program, map.dayId, publicKey, publicKeyString, t]);
 
   const loadPoiState = useCallback(
     async (
@@ -640,18 +657,18 @@ export default function DailyDungeonPage() {
                 merkleProof,
                 onChain: current.onChain,
                 loading: false,
-                error: formatError(error, "Failed to fetch POI state."),
+                error: formatError(error, t("dungeon.errors.fetchPoi")),
               }
             : current,
         );
         setSelectedPoiState(null);
-        setChainError(formatError(error, "Failed to fetch selected POI chain state."));
+        setChainError(formatError(error, t("dungeon.errors.fetchSelectedPoi")));
         return null;
       } finally {
         setLoadingChainState(false);
       }
     },
-    [program, map.dayId, publicKey, publicKeyString],
+    [program, map.dayId, publicKey, publicKeyString, t],
   );
 
   const refreshSelectedPoiState = useCallback(async (): Promise<PoiOnChainState | null> => {
@@ -802,13 +819,13 @@ export default function DailyDungeonPage() {
 
   const requireWallet = useCallback(() => {
     if (!publicKey || !anchorWallet) {
-      throw new Error("Connect wallet first.");
+      throw new Error(t("wallet.connectFirst"));
     }
     return {
       player: publicKey,
       signingProgram: createPackrunProgram(anchorWallet),
     };
-  }, [anchorWallet, publicKey]);
+  }, [anchorWallet, publicKey, t]);
 
   const showBattleResult = useCallback(
     (result: BattleResultV1, inputClearCount: number) => {
@@ -849,13 +866,13 @@ export default function DailyDungeonPage() {
       setTxSignature(signature);
       await refreshAfterTx();
     } catch (error) {
-      const message = formatError(error, "Failed to enter dungeon.");
+      const message = formatError(error, t("dungeon.errors.enterDungeon"));
       setEnterPhase({ phase: "error", message });
       setChainError(message);
     } finally {
       setTxPending(null);
     }
-  }, [map.dayId, refreshAfterTx, requireWallet]);
+  }, [map.dayId, refreshAfterTx, requireWallet, t]);
 
   const handleInitLocation = useCallback(async () => {
     if (!selectedPoi) return;
@@ -876,7 +893,7 @@ export default function DailyDungeonPage() {
       setTxSignature(signature);
       await refreshAfterTx();
     } catch (error) {
-      const message = formatError(error, "Failed to initialize location.");
+      const message = formatError(error, t("dungeon.errors.initializeLocation"));
       setInitLocationPhase({
         phase: "error",
         message,
@@ -885,25 +902,25 @@ export default function DailyDungeonPage() {
     } finally {
       setTxPending(null);
     }
-  }, [map.dayId, refreshAfterTx, requireWallet, selectedPoi]);
+  }, [map.dayId, refreshAfterTx, requireWallet, selectedPoi, t]);
 
   const handleStartBattle = useCallback(() => {
     clearBattleReplayTimer();
     setBattlePhase({ phase: "preparing" });
 
     try {
-      if (txPending !== null) throw new Error("A transaction is already pending.");
-      if (!publicKey) throw new Error("Connect wallet first.");
-      if (!playerRun) throw new Error("Enter dungeon first.");
-      if (!selectedPoi?.spec.enemy) throw new Error("No enemy selected.");
+      if (txPending !== null) throw new Error(t("dungeon.errors.transactionPending"));
+      if (!publicKey) throw new Error(t("wallet.connectFirst"));
+      if (!playerRun) throw new Error(t("dungeon.errors.enterFirst"));
+      if (!selectedPoi?.spec.enemy) throw new Error(t("dungeon.errors.noEnemy"));
 
       const onChain = selectedPoiState;
-      if (!onChain?.initialized) throw new Error("Initialize Location first.");
+      if (!onChain?.initialized) throw new Error(t("dungeon.actions.initializeLocation"));
       if (isOnCooldown(onChain)) {
-        throw new Error(`Clear Enemy cooldown ${formatCooldown(getCooldownSeconds(onChain))}.`);
+        throw new Error(`${t("battle.clearEnemy")} ${t("common.cooldown")} ${formatCooldown(getCooldownSeconds(onChain), t("common.ready"))}.`);
       }
       if (playerRun.energy < ENEMY_CLEAR_ENERGY_COST) {
-        throw new Error("Not enough energy.");
+        throw new Error(t("dungeon.errors.notEnoughEnergy"));
       }
 
       const clearCount = selectedPoiState?.clearCount ?? 0;
@@ -925,7 +942,7 @@ export default function DailyDungeonPage() {
 
       showBattleResult(result, clearCount);
     } catch (error) {
-      setBattlePhase({ phase: "error", message: formatError(error, "Failed to start battle.") });
+      setBattlePhase({ phase: "error", message: formatError(error, t("dungeon.errors.startBattle")) });
     }
   }, [
     clearBattleReplayTimer,
@@ -939,6 +956,7 @@ export default function DailyDungeonPage() {
     selectedPoiState,
     showBattleResult,
     txPending,
+    t,
   ]);
 
   const handleClearEnemy = useCallback(async () => {
@@ -978,15 +996,15 @@ export default function DailyDungeonPage() {
       clearBattleReplayTimer();
       setBattlePhase({ phase: "success", signature, result: battle.result });
       pushToast({
-        title: `+${goldReward} Gold / +${goldReward} 金币`,
+        title: t("dungeon.gold.reward", { amount: goldReward }),
         message: nextPlayerRun?.hasGoldBalance
-          ? `Gold / 金币 ${formatGold(nextPlayerRun.goldBalance)}`
-          : "Gold balance will appear after re-entering the dungeon.",
+          ? `${t("dungeon.gold.label")} ${formatGold(nextPlayerRun.goldBalance)}`
+          : t("dungeon.gold.balanceAfterReenter"),
         signature,
         variant: "success",
       });
     } catch (error) {
-      const message = formatError(error, "Failed to submit enemy clear.");
+      const message = formatError(error, t("dungeon.errors.submitEnemyClear"));
       setBattlePhase({
         phase: "error",
         message,
@@ -1006,6 +1024,7 @@ export default function DailyDungeonPage() {
     pushToast,
     selectedPoi,
     selectedPoiState,
+    t,
   ]);
 
   const handleRetry = useCallback(() => {
@@ -1028,7 +1047,7 @@ export default function DailyDungeonPage() {
     if (selectedPoi?.spec.kind === LocationKind.Boss && selectedPoi.spec.id !== primaryBossId) {
       setBossBattlePhase({
         phase: "error",
-        message: "Deprecated map warning: only the first Boss POI can start a raid.",
+        message: t("dungeon.errors.deprecatedBossRaid"),
       });
       return;
     }
@@ -1036,7 +1055,7 @@ export default function DailyDungeonPage() {
     clearBossReplayTimer();
     setBossBattlePhase({ phase: "idle" });
     setBattleOverlayTarget("boss");
-  }, [clearBossReplayTimer, primaryBossId, selectedPoi]);
+  }, [clearBossReplayTimer, primaryBossId, selectedPoi, t]);
 
   const handleCloseBattleOverlay = useCallback(() => {
     if (
@@ -1069,7 +1088,7 @@ export default function DailyDungeonPage() {
         setTxSignature(signature);
         await refreshAfterTx();
       } catch (error) {
-        const message = formatError(error, "Failed to initialize shop slot.");
+        const message = formatError(error, t("dungeon.errors.initShopSlot"));
         setShopActionPhase({
           phase: "error",
           message,
@@ -1079,14 +1098,14 @@ export default function DailyDungeonPage() {
         setTxPending(null);
       }
     },
-    [map.dayId, refreshAfterTx, requireWallet, selectedPoi],
+    [map.dayId, refreshAfterTx, requireWallet, selectedPoi, t],
   );
 
   const handleBuyItem = useCallback(
     async (slotIndex: number) => {
       if (!selectedPoi?.spec.shop || !selectedPoi.onChain?.stock) return;
       if (!playerRun) {
-        setShopActionPhase({ phase: "error", message: "Enter dungeon before buying items." });
+        setShopActionPhase({ phase: "error", message: t("shop.enterBeforeBuying") });
         return;
       }
 
@@ -1100,13 +1119,13 @@ export default function DailyDungeonPage() {
       if (!playerRun.hasGoldBalance) {
         setShopActionPhase({
           phase: "error",
-          message: "Re-enter dungeon or reset localnet after gold migration.",
+          message: t("dungeon.gold.migrationWarning"),
         });
         return;
       }
       const price = stockInfo.currentPrice ?? stockInfo.price ?? slot.price;
       if (playerRun.goldBalance < price) {
-        setShopActionPhase({ phase: "error", message: "Not enough gold / 金币不足." });
+        setShopActionPhase({ phase: "error", message: t("shop.notEnoughGold") });
         return;
       }
 
@@ -1147,15 +1166,15 @@ export default function DailyDungeonPage() {
         setTxSignature(signature);
         await refreshAfterTx();
         pushToast({
-          title: `Bought item / 购买成功: ${definition.name}`,
+          title: t("shop.bought", { name: definition.name }),
           message: placement.placed
-            ? "Added to backpack / 已加入背包"
-            : "Added to inventory; no room in backpack.",
+            ? t("backpack.added")
+            : t("backpack.addedInventoryNoRoom"),
           signature,
           variant: placement.placed ? "success" : "warning",
         });
       } catch (error) {
-        const message = formatError(error, "Purchase failed.");
+        const message = formatError(error, t("dungeon.errors.purchaseFailed"));
         setShopActionPhase({ phase: "error", message });
         setChainError(message);
       } finally {
@@ -1170,6 +1189,7 @@ export default function DailyDungeonPage() {
       refreshAfterTx,
       requireWallet,
       selectedPoi,
+      t,
     ],
   );
 
@@ -1178,15 +1198,15 @@ export default function DailyDungeonPage() {
     setBossBattlePhase({ phase: "preparing" });
 
     try {
-      if (!publicKey) throw new Error("Connect wallet first.");
-      if (!playerRun) throw new Error("Enter dungeon first.");
-      if (!selectedPoi?.spec.boss) throw new Error("No boss selected.");
+      if (!publicKey) throw new Error(t("wallet.connectFirst"));
+      if (!playerRun) throw new Error(t("dungeon.errors.enterFirst"));
+      if (!selectedPoi?.spec.boss) throw new Error(t("dungeon.errors.noBoss"));
       if (selectedPoi.spec.id !== primaryBossId) {
-        throw new Error("Deprecated map warning: only the first Boss POI can start a raid.");
+        throw new Error(t("dungeon.errors.deprecatedBossRaid"));
       }
 
       const onChain = selectedPoiState ?? selectedPoi.onChain;
-      if (!onChain?.initialized) throw new Error("Initialize Location first.");
+      if (!onChain?.initialized) throw new Error(t("dungeon.actions.initializeLocation"));
 
       const boss = selectedPoi.spec.boss;
       const bossAsEnemy: EnemyConfig = {
@@ -1217,7 +1237,7 @@ export default function DailyDungeonPage() {
     } catch (error) {
       setBossBattlePhase({
         phase: "error",
-        message: formatError(error, "Failed to start boss battle."),
+        message: formatError(error, t("dungeon.errors.startBossBattle")),
       });
     }
   }, [
@@ -1232,6 +1252,7 @@ export default function DailyDungeonPage() {
     selectedPoi,
     selectedPoiState,
     showBossBattleResult,
+    t,
   ]);
 
   const handleInitBossShard = useCallback(async () => {
@@ -1239,12 +1260,12 @@ export default function DailyDungeonPage() {
     if (selectedPoi.spec.id !== primaryBossId) {
       setBossBattlePhase({
         phase: "error",
-        message: "Deprecated map warning: only the first Boss POI can initialize a shard.",
+        message: t("dungeon.errors.deprecatedBossShard"),
       });
       return;
     }
     if (!dailyDungeon) {
-      setBossBattlePhase({ phase: "error", message: "Daily dungeon account is not initialized." });
+      setBossBattlePhase({ phase: "error", message: t("dungeon.errors.dungeonNotReady") });
       return;
     }
 
@@ -1264,20 +1285,20 @@ export default function DailyDungeonPage() {
       setTxSignature(signature);
       await refreshAfterTx();
     } catch (error) {
-      const message = formatError(error, "Failed to initialize BossDamageShard.");
+      const message = formatError(error, t("dungeon.errors.initBossShard"));
       setBossBattlePhase({ phase: "error", message });
       setChainError(message);
     } finally {
       setTxPending(null);
     }
-  }, [dailyDungeon, map.dayId, primaryBossId, refreshAfterTx, requireWallet, selectedPoi]);
+  }, [dailyDungeon, map.dayId, primaryBossId, refreshAfterTx, requireWallet, selectedPoi, t]);
 
   const handleSubmitBossDamage = useCallback(async () => {
     if (!selectedPoi?.spec.boss) return;
     if (selectedPoi.spec.id !== primaryBossId) {
       setBossBattlePhase({
         phase: "error",
-        message: "Deprecated map warning: only the first Boss POI can submit damage.",
+        message: t("dungeon.errors.deprecatedBossSubmit"),
       });
       return;
     }
@@ -1286,11 +1307,11 @@ export default function DailyDungeonPage() {
     const bossBattle = bossBattlePhase;
     if (bossBattle.phase !== "result") return;
     if (bossBattle.result.bossDamageScore <= 0) {
-      setBossBattlePhase({ phase: "error", message: "Boss damage must be greater than zero." });
+      setBossBattlePhase({ phase: "error", message: t("dungeon.errors.bossDamagePositive") });
       return;
     }
     if (!dailyDungeon) {
-      setBossBattlePhase({ phase: "error", message: "Daily dungeon account is not initialized." });
+      setBossBattlePhase({ phase: "error", message: t("dungeon.errors.dungeonNotReady") });
       return;
     }
 
@@ -1303,9 +1324,7 @@ export default function DailyDungeonPage() {
       const shardIndex = bossShardIndexForPlayer(player, dailyDungeon.bossShardCount);
       const shard = onChain.bossShards?.find((entry) => entry.index === shardIndex);
       if (!shard?.initialized) {
-        throw new Error(
-          `Boss damage shard #${shardIndex} is not initialized on-chain. Add an init BossDamageShard instruction or initialize the shard before submitting damage.`,
-        );
+        throw new Error(t("dungeon.errors.bossShardMissing", { shardIndex }));
       }
 
       const damage = bossBattle.result.bossDamageScore;
@@ -1322,7 +1341,7 @@ export default function DailyDungeonPage() {
       await refreshAfterTx();
       setBossBattlePhase({ phase: "success", damage, signature, result: bossBattle.result });
     } catch (error) {
-      const message = formatError(error, "Failed to submit boss damage.");
+      const message = formatError(error, t("dungeon.errors.submitBossDamage"));
       setBossBattlePhase({
         phase: "error",
         message,
@@ -1340,6 +1359,7 @@ export default function DailyDungeonPage() {
     requireWallet,
     selectedPoi,
     selectedPoiState,
+    t,
   ]);
 
   const handleClaimBossNft = useCallback(async () => {
@@ -1347,7 +1367,7 @@ export default function DailyDungeonPage() {
     if (selectedPoi.spec.id !== primaryBossId) {
       setBossNftClaimPhase({
         phase: "error",
-        message: "Deprecated map warning: only the first Boss POI can claim a Boss NFT.",
+        message: t("dungeon.errors.deprecatedBossClaim"),
       });
       return;
     }
@@ -1367,7 +1387,7 @@ export default function DailyDungeonPage() {
       setTxSignature(signature);
       await refreshAfterTx();
     } catch (error) {
-      const message = formatError(error, "Failed to claim Boss participation NFT.");
+      const message = formatError(error, t("dungeon.errors.claimBossNft"));
       setBossNftClaimPhase({
         phase: "error",
         message,
@@ -1376,7 +1396,7 @@ export default function DailyDungeonPage() {
     } finally {
       setTxPending(null);
     }
-  }, [map.dayId, primaryBossId, refreshAfterTx, requireWallet, selectedPoi]);
+  }, [map.dayId, primaryBossId, refreshAfterTx, requireWallet, selectedPoi, t]);
 
   const handleClaimDailyReward = useCallback(async () => {
     setDailyRewardPhase({ phase: "submitting" });
@@ -1384,12 +1404,12 @@ export default function DailyDungeonPage() {
     setTxSignature(null);
     setChainError(null);
     try {
-      if (!selectedPoi) throw new Error("No location selected.");
+      if (!selectedPoi) throw new Error(t("dungeon.errors.noLocation"));
       const { player, signingProgram } = requireWallet();
       const poiIdHash = sha256Bytes32(selectedPoi.spec.id);
       const sourceRef = bytesToHex(poiIdHash);
       const signature = await claimDailyReward(signingProgram, map.dayId, player, poiIdHash);
-      let localItemMessage = "Reward claimed.";
+      let localItemMessage = t("treasure.rewardClaimed");
       let toastVariant: DungeonToast["variant"] = "success";
       if (!hasItemSource("treasure", sourceRef)) {
         const treasureItem = createBackpackItemFromTreasure(
@@ -1408,21 +1428,21 @@ export default function DailyDungeonPage() {
         );
         const placement = addAndAutoPlaceItem(treasureItem);
         localItemMessage = placement.placed
-          ? "Added to backpack / 已加入背包"
-          : "Added to inventory; no room in backpack.";
+          ? t("backpack.added")
+          : t("backpack.addedInventoryNoRoom");
         toastVariant = placement.placed ? "success" : "warning";
       }
       setDailyRewardPhase({ phase: "success", signature });
       setTxSignature(signature);
       await refreshAfterTx();
       pushToast({
-        title: `+${DEFAULT_TREASURE_GOLD_REWARD} Gold / +${DEFAULT_TREASURE_GOLD_REWARD} 金币`,
+        title: t("dungeon.gold.reward", { amount: DEFAULT_TREASURE_GOLD_REWARD }),
         message: localItemMessage,
         signature,
         variant: toastVariant,
       });
     } catch (error) {
-      const message = formatError(error, "Failed to claim daily reward.");
+      const message = formatError(error, t("dungeon.errors.claimDailyReward"));
       setDailyRewardPhase({
         phase: "error",
         message,
@@ -1439,17 +1459,18 @@ export default function DailyDungeonPage() {
     refreshAfterTx,
     requireWallet,
     selectedPoi,
+    t,
   ]);
 
   const handleRestoreTreasureItem = useCallback(() => {
     if (!selectedPoi) return;
 
     try {
-      if (!publicKeyString) throw new Error("Connect wallet first.");
+      if (!publicKeyString) throw new Error(t("wallet.connectFirst"));
       const sourceRef = treasureSourceRef(selectedPoi.spec);
       if (hasItemSource("treasure", sourceRef)) {
         pushToast({
-          title: "Treasure backpack item already restored",
+          title: t("backpack.alreadyRestored"),
           variant: "warning",
         });
         return;
@@ -1471,15 +1492,13 @@ export default function DailyDungeonPage() {
       );
       const placement = addAndAutoPlaceItem(treasureItem);
       pushToast({
-        title: "Restored treasure backpack item locally.",
-        message: placement.placed
-          ? "Added to backpack"
-          : "Added to inventory; no room in backpack.",
+        title: t("backpack.restoredLocal"),
+        message: placement.placed ? t("backpack.added") : t("backpack.addedInventoryNoRoom"),
         variant: placement.placed ? "success" : "warning",
       });
     } catch (error) {
       pushToast({
-        title: formatError(error, "Failed to restore treasure backpack item."),
+        title: formatError(error, t("dungeon.errors.restoreTreasure")),
         variant: "error",
       });
     }
@@ -1490,13 +1509,14 @@ export default function DailyDungeonPage() {
     publicKeyString,
     pushToast,
     selectedPoi,
+    t,
   ]);
 
   const dungeonStatus = dungeonLoading
-    ? "Loading"
+    ? t("dungeon.status.loading")
     : dailyDungeon
       ? dailyDungeon.status
-      : "Not initialized";
+      : t("dungeon.status.notInitialized");
   const rootMatches = !dailyDungeon || dailyDungeon.mapRoot === merkleTree.root;
   const selectedOnChain = selectedPoiState ?? selectedPoi?.onChain ?? null;
   const selectedEnemy = selectedPoi?.spec.kind === LocationKind.Enemy ? selectedPoi.spec.enemy : undefined;
@@ -1511,7 +1531,7 @@ export default function DailyDungeonPage() {
   const playerStats = playerRun
     ? computePlayerBattleStats(buildPlayerSnapshot(playerRun), backpackSnapshot)
     : undefined;
-  const playerDisplayName = publicKeyString ? shortSignature(publicKeyString) : "Player";
+  const playerDisplayName = publicKeyString ? shortSignature(publicKeyString) : t("common.player");
   const pendingBossDamage =
     bossBattlePhase.phase === "result" || bossBattlePhase.phase === "success"
       ? bossBattlePhase.damage
@@ -1529,39 +1549,39 @@ export default function DailyDungeonPage() {
     <div className={styles.page}>
       <header className={styles.header}>
         <div className={styles.headerLeft}>
-          <h1 className={styles.title}>🗺️ Daily Dungeon</h1>
+          <h1 className={styles.title}>🗺️ {t("dungeon.title")}</h1>
           <span className={styles.dayId}>{map.dayId}</span>
         </div>
         <div className={styles.headerRight}>
           <div className={styles.stats}>
-            <StatPill label="Chain:" value={dungeonStatus} title="Dungeon status" />
+            <StatPill label={t("dungeon.status.chain")} value={dungeonStatus} title={t("dungeon.status.dungeonStatusTitle")} />
             {playerRun ? (
               <>
-                <StatPill label="EN" value={playerRun.energy} title="Energy" />
-                <span className={`${styles.stat} ${styles.goldPill}`} title="Gold / 金币">
-                  🪙 Gold / 金币 {formatGold(playerRun.goldBalance)}
+                <StatPill label={t("dungeon.stats.energyShort")} value={playerRun.energy} title={t("common.energy")} />
+                <span className={`${styles.stat} ${styles.goldPill}`} title={t("dungeon.gold.label")}>
+                  🪙 {t("dungeon.gold.label")} {formatGold(playerRun.goldBalance)}
                 </span>
-                <StatPill label="CL" value={playerRun.clearedLocations} title="Cleared locations" />
-                <StatPill label="BD" value={playerRun.bossDamage} title="Boss damage" />
-                <StatPill label="IT" value={playerRun.itemsPurchased} title="Items purchased" />
+                <StatPill label={t("dungeon.stats.clearedShort")} value={playerRun.clearedLocations} title={t("dungeon.stats.clearedLocations")} />
+                <StatPill label={t("dungeon.stats.bossDamageShort")} value={playerRun.bossDamage} title={t("dungeon.stats.bossDamage")} />
+                <StatPill label={t("dungeon.stats.itemsShort")} value={playerRun.itemsPurchased} title={t("dungeon.stats.itemsPurchased")} />
               </>
             ) : (
               <StatPill
-                label="Run:"
-                value={playerRunLoading ? "Loading" : "None"}
-                title="Player run"
+                label={t("dungeon.status.playerRun")}
+                value={playerRunLoading ? t("dungeon.status.loading") : t("dungeon.status.none")}
+                title={t("dungeon.status.playerRunTitle")}
               />
             )}
-            <StatPill label="POI" value={map.locations.length} title="Total POIs" />
-            <StatPill label="" value={`${map.width}x${map.height}`} title="Map size" />
+            <StatPill label="POI" value={map.locations.length} title={t("dungeon.stats.totalPois")} />
+            <StatPill label="" value={`${map.width}x${map.height}`} title={t("dungeon.stats.mapSize")} />
           </div>
           <button
             type="button"
             className={styles.backpackButton}
             onClick={() => setBackpackOpen(true)}
-            aria-label={`Open Backpack / 背包 with ${inventory.length} items`}
+            aria-label={t("dungeon.backpack.openAria", { count: inventory.length })}
           >
-            Backpack / 背包 ({inventory.length})
+            {t("dungeon.backpack.open", { count: inventory.length })}
             {playerRun ? ` · 🪙 ${formatGold(playerRun.goldBalance)}` : ""}
           </button>
           {wallet.connected && !playerRun && (
@@ -1570,7 +1590,7 @@ export default function DailyDungeonPage() {
               onClick={handleEnterDungeon}
               disabled={txPending !== null || enterPhase.phase === "submitting" || !dailyDungeon}
             >
-              {enterPhase.phase === "submitting" ? "Entering..." : "Enter Dungeon"}
+              {enterPhase.phase === "submitting" ? t("dungeon.actions.entering") : t("dungeon.actions.enter")}
             </button>
           )}
           <WalletButton className={styles.walletButton} />
@@ -1587,19 +1607,19 @@ export default function DailyDungeonPage() {
         <div className={styles.statusBar}>
           {chainError && <span className={styles.statusError}>{chainError}</span>}
           {dungeonError && <span className={styles.statusError}>{dungeonError}</span>}
-          {!rootMatches && <span className={styles.statusWarn}>Local map root differs from on-chain map root.</span>}
+          {!rootMatches && <span className={styles.statusWarn}>{t("dungeon.map.rootMismatch")}</span>}
           {hasDeprecatedMultiBossMap && (
             <span className={styles.statusWarn}>
-              Deprecated map warning: multiple Boss POIs detected; only {shortId(primaryBossId ?? "unknown")} can raid.
+              {t("dungeon.map.deprecatedMultiBoss", { bossId: shortId(primaryBossId ?? t("common.unknown")) })}
             </span>
           )}
           {enterPhase.phase === "error" && <span className={styles.statusError}>{enterPhase.message}</span>}
           {enterPhase.phase === "success" && (
-            <span className={styles.statusOk}>Entered: {shortSignature(enterPhase.signature)}</span>
+            <span className={styles.statusOk}>{t("dungeon.status.entered", { signature: shortSignature(enterPhase.signature) })}</span>
           )}
           {txSignature && (
             <span className={styles.statusOk}>
-              Transaction confirmed: <TxExplorerLink signature={txSignature} />
+              {t("dungeon.status.transactionConfirmed")} <TxExplorerLink signature={txSignature} />
             </span>
           )}
         </div>
@@ -1617,7 +1637,7 @@ export default function DailyDungeonPage() {
         {Object.entries(POI_ICONS).map(([kind, icon]) => (
           <span key={kind} className={styles.legendItem}>
             <span className={styles.legendDot} style={{ background: POI_COLORS[kind as LocationKindType] }} />
-            {icon} {kind}
+            {icon} {locationKindLabel(kind as LocationKindType, t)}
           </span>
         ))}
       </div>
@@ -1671,7 +1691,7 @@ export default function DailyDungeonPage() {
                   onClick={() => handlePoiClick(spec)}
                   onMouseEnter={() => setHoveredPoi(spec)}
                   onMouseLeave={() => setHoveredPoi(null)}
-                  title={`${spec.kind}: ${spec.id} (${cell.x}, ${cell.y})${tileLocked ? ` - Locked for ${formatCooldown(getCooldownSeconds(tileState))}` : ""}${tileDeprecatedBoss ? " - Deprecated Boss POI" : ""}`}
+                  title={`${locationKindLabel(spec.kind, t)}: ${spec.id} (${cell.x}, ${cell.y})${tileLocked ? ` - ${t("dungeon.map.tileLockedTitle", { duration: formatCooldown(getCooldownSeconds(tileState), t("common.ready")) })}` : ""}${tileDeprecatedBoss ? ` - ${t("dungeon.map.deprecatedBossTitle")}` : ""}`}
                 >
                   <span className={styles.poiIcon}>{POI_ICONS[spec.kind]}</span>
                   {tileLocked && <span className={styles.poiLock} aria-hidden="true">🔒</span>}
@@ -1728,7 +1748,7 @@ export default function DailyDungeonPage() {
           ) : (
             <div className={styles.emptyState}>
               <span className={styles.emptyIcon}>👆</span>
-              <p>Click a POI on the map to view details</p>
+              <p>{t("dungeon.map.empty")}</p>
             </div>
           )}
         </aside>
@@ -1750,7 +1770,7 @@ export default function DailyDungeonPage() {
         <BattleOverlay
           open={battleOverlayTarget === "enemy"}
           encounterKind="enemy"
-          title={`Battle: ${selectedEnemy.name}`}
+          title={`${t("battle.title")}: ${selectedEnemy.name}`}
           enemyName={selectedEnemy.name}
           enemyLevel={selectedOnChain?.difficultyLevel ?? selectedEnemy.level}
           playerName={playerDisplayName}
@@ -1787,7 +1807,7 @@ export default function DailyDungeonPage() {
         <BattleOverlay
           open={battleOverlayTarget === "boss"}
           encounterKind="boss"
-          title="Boss Raid"
+          title={t("boss.raid")}
           enemyName={selectedOnChain?.bossName ?? selectedBoss.name}
           enemyLevel={selectedBoss.level}
           playerName={playerDisplayName}
@@ -1889,6 +1909,7 @@ function PoiDetailPanel({
   readonly primaryBossId: string | null;
   readonly hasDeprecatedMultiBossMap: boolean;
 }) {
+  const { t } = useI18n();
   const { spec, onChain, merkleProof } = detail;
   const initialized = onChain?.initialized ?? false;
   const locationAddress = locationPdaLabel(dayId, spec);
@@ -1899,13 +1920,17 @@ function PoiDetailPanel({
       <div className={styles.poiHeader}>
         <span className={styles.poiHeaderIcon}>{POI_ICONS[spec.kind]}</span>
         <div className={styles.poiHeaderText}>
-          <h2 className={styles.detailTitle}>{spec.kind}</h2>
+          <h2 className={styles.detailTitle}>{locationKindLabel(spec.kind, t)}</h2>
           <span className={styles.poiHeaderMeta}>
             ({spec.position.x}, {spec.position.y}) · {shortId(spec.id)}
           </span>
         </div>
         <span className={initialized ? styles.badgeOk : styles.badgeWarn}>
-          {detail.loading || loadingChainState ? "Loading" : initialized ? "Initialized" : "Missing"}
+          {detail.loading || loadingChainState
+            ? t("common.loading")
+            : initialized
+              ? t("common.initialized")
+              : t("common.missing")}
         </span>
       </div>
 
@@ -1913,29 +1938,29 @@ function PoiDetailPanel({
 
       {hasDeprecatedMultiBossMap && spec.kind === LocationKind.Boss && !isPrimaryBoss && (
         <div className={styles.deprecatedWarning}>
-          Deprecated map warning: this extra Boss POI is disabled. Only the first Boss can raid.
+          {t("dungeon.poi.deprecatedBoss")}
         </div>
       )}
 
       <div className={styles.detailCard}>
-        <h3 className={styles.sectionTitle}>Chain State</h3>
+        <h3 className={styles.sectionTitle}>{t("dungeon.poi.chainState")}</h3>
         <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Initialized</span>
-          <span className={styles.metaValue}>{initialized ? "Yes" : "No"}</span>
+          <span className={styles.metaLabel}>{t("dungeon.poi.initialized")}</span>
+          <span className={styles.metaValue}>{initialized ? t("common.yes") : t("common.no")}</span>
         </div>
         <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>PDA</span>
+          <span className={styles.metaLabel}>{t("common.pda")}</span>
           <span className={styles.metaValue}>{locationAddress}</span>
         </div>
         <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Hash</span>
+          <span className={styles.metaLabel}>{t("common.hash")}</span>
           <span className={styles.metaValue}>{onChain?.location?.baseConfigHash ?? spec.baseConfigHash}</span>
         </div>
       </div>
 
       {!detail.loading && !initialized && (
         <div className={styles.detailCard}>
-          <p className={styles.hint}>This POI account is not initialized on-chain.</p>
+          <p className={styles.hint}>{t("dungeon.poi.notInitialized")}</p>
           {ENABLE_MANUAL_POI_INIT ? (
             <>
               {!walletConnected ? (
@@ -1946,7 +1971,7 @@ function PoiDetailPanel({
                   onClick={onEnterDungeon}
                   disabled={txPending !== null || !dailyDungeon}
                 >
-                  {txPending === "enterDungeon" ? "Entering..." : "Enter Dungeon"}
+                  {txPending === "enterDungeon" ? t("dungeon.actions.entering") : t("dungeon.actions.enter")}
                 </button>
               ) : (
                 <button
@@ -1954,13 +1979,13 @@ function PoiDetailPanel({
                   onClick={onInitLocation}
                   disabled={txPending !== null || initLocationPhase.phase === "submitting" || !dailyDungeon}
                 >
-                  {initLocationPhase.phase === "submitting" ? "Initializing..." : "Initialize Location"}
+                  {initLocationPhase.phase === "submitting" ? t("dungeon.actions.initializing") : t("dungeon.actions.initializeLocation")}
                 </button>
               )}
             </>
           ) : (
             <p className={styles.hint} style={{ marginTop: 8 }}>
-              ⏳ Waiting for crank to initialize this location.
+              ⏳ {t("dungeon.poi.waitingCrank")}
             </p>
           )}
           {initLocationPhase.phase === "error" && <div className={styles.battleError}>❌ {initLocationPhase.message}</div>}
@@ -1976,7 +2001,7 @@ function PoiDetailPanel({
             onClick={onEnterDungeon}
             disabled={txPending !== null || !dailyDungeon}
           >
-            {txPending === "enterDungeon" ? "Entering..." : "Enter Dungeon"}
+            {txPending === "enterDungeon" ? t("dungeon.actions.entering") : t("dungeon.actions.enter")}
           </button>
         </div>
       )}
@@ -2046,22 +2071,22 @@ function PoiDetailPanel({
       )}
 
       <div className={styles.detailCard}>
-        <h3 className={styles.sectionTitle}>🔗 Merkle Proof</h3>
+        <h3 className={styles.sectionTitle}>🔗 {t("dungeon.poi.merkleProof")}</h3>
         <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Root</span>
+          <span className={styles.metaLabel}>{t("common.root")}</span>
           <span className={styles.metaValue}>{merkleRoot}</span>
         </div>
         <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Proof Steps</span>
+          <span className={styles.metaLabel}>{t("dungeon.poi.proofSteps")}</span>
           <span className={styles.metaValue}>{merkleProof.length}</span>
         </div>
       </div>
 
       {initLocationPhase.phase === "success" && (
-        <p className={styles.initialized}>Initialized: <TxExplorerLink signature={initLocationPhase.signature} /></p>
+        <p className={styles.initialized}>{t("dungeon.status.initializedTx")} <TxExplorerLink signature={initLocationPhase.signature} /></p>
       )}
       {txSignature && (
-        <p className={styles.initialized}>Last transaction: <TxExplorerLink signature={txSignature} /></p>
+        <p className={styles.initialized}>{t("dungeon.status.lastTransaction")} <TxExplorerLink signature={txSignature} /></p>
       )}
     </div>
   );
@@ -2090,6 +2115,7 @@ function EnemyContent({
   readonly playerRun: PlayerRunState | null;
   readonly txPending: TxPending;
 }) {
+  const { t } = useI18n();
   const onCooldown = isOnCooldown(onChain);
   const cooldownSecs = getCooldownSeconds(onChain);
   const nextAvailableAt = onChain?.nextAvailableAt;
@@ -2100,41 +2126,41 @@ function EnemyContent({
     <div className={styles.detailSection}>
       <h3 className={styles.sectionTitle}>⚔️ {enemy.name}</h3>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Level</span>
+        <span className={styles.metaLabel}>{t("common.level")}</span>
         <span className={styles.metaValue}>{enemy.level}</span>
       </div>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Base HP</span>
+        <span className={styles.metaLabel}>{t("dungeon.labels.baseHp")}</span>
         <span className={styles.metaValue}>{onChain?.baseHp ?? enemy.maxHealth}</span>
       </div>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Base Damage</span>
+        <span className={styles.metaLabel}>{t("dungeon.labels.baseDamage")}</span>
         <span className={styles.metaValue}>{onChain?.baseDamage ?? enemy.attack}</span>
       </div>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Clear Count</span>
+        <span className={styles.metaLabel}>{t("dungeon.labels.clearCount")}</span>
         <span className={styles.metaValue}>{onChain?.clearCount ?? 0}</span>
       </div>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Difficulty</span>
+        <span className={styles.metaLabel}>{t("dungeon.labels.difficulty")}</span>
         <span className={styles.metaValue}>{onChain?.difficultyLevel ?? enemy.level}</span>
       </div>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Next Available</span>
-        <span className={styles.metaValue}>{formatNextAvailable(nextAvailableAt)}</span>
+        <span className={styles.metaLabel}>{t("dungeon.labels.nextAvailable")}</span>
+        <span className={styles.metaValue}>{formatNextAvailable(nextAvailableAt, t("common.ready"))}</span>
       </div>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Cooldown</span>
-        <span className={styles.metaValue}>{formatCooldown(cooldownSecs)}</span>
+        <span className={styles.metaLabel}>{t("common.cooldown")}</span>
+        <span className={styles.metaValue}>{formatCooldown(cooldownSecs, t("common.ready"))}</span>
       </div>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Valuable Cap</span>
+        <span className={styles.metaLabel}>{t("dungeon.labels.valuableCap")}</span>
         <span className={styles.metaValue}>{onChain?.valuableClearCap ?? "-"}</span>
       </div>
 
       {onCooldown && (
         <div className={styles.cooldownNotice}>
-          Enemy recovering / Locked for {formatCooldown(cooldownSecs)}
+          {t("battle.enemyRecovering")} · {t("common.cooldown")} {formatCooldown(cooldownSecs, t("common.ready"))}
         </div>
       )}
 
@@ -2142,11 +2168,11 @@ function EnemyContent({
         <ConnectWalletAction />
       ) : !hasPlayerRun ? (
         <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
-          Enter Dungeon
+          {t("dungeon.actions.enter")}
         </button>
       ) : (
         <BattleArena
-          title="Battle"
+          title={t("battle.title")}
           encounterKind="enemy"
           enemyName={enemy.name}
           phase={battlePhase}
@@ -2154,7 +2180,7 @@ function EnemyContent({
           cooldownSeconds={onCooldown ? cooldownSecs : 0}
           energyCost={ENEMY_CLEAR_ENERGY_COST}
           playerEnergy={playerRun?.energy}
-          idleActionLabel="Open Battle"
+          idleActionLabel={t("battle.open")}
           onStart={onStartBattle}
           onSubmit={onClearEnemy}
           onRetry={onRetry}
@@ -2187,34 +2213,35 @@ function ShopContent({
   readonly playerRun: PlayerRunState | null;
   readonly txPending: TxPending;
 }) {
+  const { t } = useI18n();
   const playerGoldKnown = playerRun?.hasGoldBalance ?? false;
   const playerGold = playerRun?.goldBalance ?? 0;
 
   return (
     <div className={styles.detailCard}>
-      <h3 className={styles.sectionTitle}>🛒 Shop</h3>
+      <h3 className={styles.sectionTitle}>🛒 {t("shop.title")}</h3>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Keeper</span>
-        <span className={styles.metaValue}>{onChain?.keeperName || shop.keeperName || "Unknown"}</span>
+        <span className={styles.metaLabel}>{t("dungeon.labels.keeper")}</span>
+        <span className={styles.metaValue}>{onChain?.keeperName || shop.keeperName || t("common.unknown")}</span>
       </div>
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Slots</span>
+        <span className={styles.metaLabel}>{t("dungeon.labels.slots")}</span>
         <span className={styles.metaValue}>{onChain?.slotCount ?? shop.itemSlots.length}</span>
       </div>
       <div className={styles.shopGoldBanner}>
-        <span>Current Gold / 当前金币</span>
+        <span>{t("dungeon.gold.current")}</span>
         <strong>🪙 {formatGold(playerGold)}</strong>
       </div>
       {hasPlayerRun && !playerGoldKnown && (
         <p className={styles.goldWarning}>
-          Re-enter dungeon or reset localnet after gold migration.
+          {t("dungeon.gold.migrationWarning")}
         </p>
       )}
       <p className={styles.mvpNotice}>
-        Backpack items are stored locally in this MVP; the purchase itself is on-chain.
+        {t("shop.mvpNotice")}
       </p>
 
-      <h3 className={styles.sectionTitle}>Items</h3>
+      <h3 className={styles.sectionTitle}>{t("common.items")}</h3>
       {shop.itemSlots.map((slot, index) => {
         const stockInfo = onChain?.stock?.[index];
         const previewSlot = {
@@ -2252,7 +2279,7 @@ function ShopContent({
               <div className={styles.shopItemTitle}>
                 <span className={styles.shopSlotName}>{definition.name}</span>
                 <span className={styles.shopItemSubline}>
-                  Price: {formatGold(price)}
+                  {t("shop.itemPrice", { price: formatGold(price) })}
                 </span>
               </div>
               <span
@@ -2265,38 +2292,38 @@ function ShopContent({
             <p className={styles.shopEffectSummary}>{itemEffectSummary(definition)}</p>
             {!stockInfo?.initialized ? (
               <>
-                <p className={styles.hint}>Slot #{index} is not initialized on-chain.</p>
+                <p className={styles.hint}>{t("shop.slotNotInitialized", { index })}</p>
                 <button
                   className={styles.btnInit}
                   onClick={() => onInitShopSlot(index)}
                   disabled={txPending !== null}
                 >
-                  {isInitializing ? "Initializing Slot..." : "Initialize Slot"}
+                  {isInitializing ? t("shop.initializingSlot") : t("shop.initializeSlot")}
                 </button>
               </>
             ) : (
               <>
                 <div className={styles.shopStatsGrid}>
-                  <ShopCardStat label="Current Gold" value={playerGoldKnown ? formatGold(playerGold) : "0"} />
-                  <ShopCardStat label="Price" value={formatGold(price)} />
+                  <ShopCardStat label={t("shop.currentGold")} value={playerGoldKnown ? formatGold(playerGold) : "0"} />
+                  <ShopCardStat label={t("common.price")} value={formatGold(price)} />
                   <ShopCardStat
-                    label="After purchase"
-                    value={playerGoldKnown ? formatGold(afterPurchase) : "Unavailable"}
+                    label={t("shop.afterPurchase")}
+                    value={playerGoldKnown ? formatGold(afterPurchase) : t("common.unavailable")}
                   />
-                  <ShopCardStat label="Stock" value={shopStockLabel(stockInfo, slot.stock)} />
-                  <ShopCardStat label="Sold" value={stockInfo.soldCount ?? 0} />
-                  <ShopCardStat label="Restock" value={shopRestockInfo(stockInfo)} />
+                  <ShopCardStat label={t("common.stock")} value={shopStockLabel(stockInfo, slot.stock, t)} />
+                  <ShopCardStat label={t("common.sold")} value={stockInfo.soldCount ?? 0} />
+                  <ShopCardStat label={t("common.restock")} value={shopRestockInfo(stockInfo, t)} />
                 </div>
                 <div className={styles.detailMeta}>
-                  <span className={styles.metaLabel}>Wallet Limit</span>
+                  <span className={styles.metaLabel}>{t("shop.walletLimit")}</span>
                   <span className={styles.metaValue}>{stockInfo.perWalletDailyLimit ?? "-"}</span>
                 </div>
                 {isBought ? (
-                  <div className={styles.initialized}>Purchased: <TxExplorerLink signature={shopActionPhase.signature} /></div>
+                  <div className={styles.initialized}>{t("shop.purchased")} <TxExplorerLink signature={shopActionPhase.signature} /></div>
                 ) : isBuying ? (
                   <div className={styles.battleSimulating}>
                     <div className={styles.spinner} />
-                    <span>Buying...</span>
+                    <span>{t("shop.buying")}</span>
                   </div>
                 ) : walletConnected && hasPlayerRun && inStock ? (
                   <>
@@ -2306,28 +2333,28 @@ function ShopContent({
                       disabled={txPending !== null || !canAfford}
                       style={{ marginTop: 6 }}
                     >
-                      Buy
+                      {t("shop.buy")}
                     </button>
                     {!playerGoldKnown ? (
                       <p className={styles.goldWarning}>
-                        Re-enter dungeon or reset localnet after gold migration.
+                        {t("dungeon.gold.migrationWarning")}
                       </p>
                     ) : !canAfford ? (
-                      <p className={styles.goldWarning}>Not enough gold / 金币不足</p>
+                      <p className={styles.goldWarning}>{t("shop.notEnoughGold")}</p>
                     ) : null}
                   </>
                 ) : walletConnected && !hasPlayerRun ? (
-                  <p className={styles.hint}>Enter dungeon before buying items.</p>
+                  <p className={styles.hint}>{t("shop.enterBeforeBuying")}</p>
                 ) : !inStock ? (
                   <button className={styles.btnSecondary} disabled style={{ marginTop: 6 }}>
-                    Sold out
+                    {t("shop.soldOut")}
                   </button>
                 ) : (
-                  <p className={styles.hint}>Connect wallet to buy.</p>
+                  <p className={styles.hint}>{t("shop.connectToBuy")}</p>
                 )}
               </>
             )}
-            {isSlotInitialized && <div className={styles.initialized}>Slot initialized: <TxExplorerLink signature={shopActionPhase.signature} /></div>}
+            {isSlotInitialized && <div className={styles.initialized}>{t("shop.slotInitialized")} <TxExplorerLink signature={shopActionPhase.signature} /></div>}
             {shopActionPhase.phase === "error" && (
               <div className={styles.battleError} style={{ marginTop: 6 }}>
                 ❌ {shopActionPhase.message}
@@ -2386,6 +2413,7 @@ function BossContent({
   readonly playerRun: PlayerRunState | null;
   readonly raidEnabled: boolean;
 }) {
+  const { t } = useI18n();
   const totalBossDamage = onChain?.totalDamage ?? 0;
   const bossHp = onChain?.bossHp ?? boss.maxHealth;
   const bossDefeated = onChain?.bossDefeated ?? totalBossDamage >= bossHp;
@@ -2396,6 +2424,7 @@ function BossContent({
       : onChain?.bossShards?.find((shard) => shard.index === selectedBossShardIndex) ?? null;
   const playerContribution = onChain?.playerContribution ?? 0;
   const playerTotalDamage = onChain?.playerBossDamage ?? playerRun?.bossDamage ?? 0;
+  const alreadyChallenged = playerContribution > 0 || playerTotalDamage > 0;
   const currentShardDamage = requiredShard?.totalDamage ?? 0;
   const hasMinimumContribution = playerContribution >= MINIMUM_BOSS_NFT_DAMAGE;
   const canClaimBossNft = raidEnabled && !onChain?.bossNftClaimed && hasMinimumContribution;
@@ -2409,32 +2438,32 @@ function BossContent({
       <div className={styles.bossHeader}>
         <div>
           <h3 className={styles.sectionTitle}>👑 {onChain?.bossName ?? boss.name}</h3>
-          <p className={styles.bossSubtitle}>Reward tier {boss.rewardTier}</p>
+          <p className={styles.bossSubtitle}>{t("boss.subtitle", { tier: boss.rewardTier })}</p>
         </div>
         <span className={onChain?.bossNftClaimed ? styles.badgeOk : styles.badgeWarn}>
-          {onChain?.bossNftClaimed ? "NFT claimed" : "NFT not claimed"}
+          {onChain?.bossNftClaimed ? t("boss.nftClaimed") : t("boss.nftNotClaimed")}
         </span>
       </div>
 
       {!raidEnabled && (
         <div className={styles.deprecatedWarning}>
-          Deprecated map warning: only the first Boss POI can start raids, submit damage, or claim the Boss NFT.
+          {t("boss.deprecated")}
         </div>
       )}
 
       <div className={styles.bossStatGrid}>
-        <ShopCardStat label="Boss name" value={onChain?.bossName ?? boss.name} />
-        <ShopCardStat label="Boss level" value={boss.level} />
-        <ShopCardStat label="Boss HP" value={bossHp} />
-        <ShopCardStat label="Reward tier" value={boss.rewardTier} />
-        <ShopCardStat label="Shard count" value={onChain?.bossShards?.length ?? "-"} />
-        <ShopCardStat label="Player shard" value={selectedBossShardIndex ?? "-"} />
-        <ShopCardStat label="Shard damage" value={currentShardDamage} />
-        <ShopCardStat label="Player total" value={playerTotalDamage} />
+        <ShopCardStat label={t("boss.name")} value={onChain?.bossName ?? boss.name} />
+        <ShopCardStat label={t("boss.level")} value={boss.level} />
+        <ShopCardStat label={t("boss.hp")} value={bossHp} />
+        <ShopCardStat label={t("boss.rewardTier")} value={boss.rewardTier} />
+        <ShopCardStat label={t("boss.shardCount")} value={onChain?.bossShards?.length ?? "-"} />
+        <ShopCardStat label={t("boss.playerShard")} value={selectedBossShardIndex ?? "-"} />
+        <ShopCardStat label={t("boss.shardDamage")} value={currentShardDamage} />
+        <ShopCardStat label={t("boss.playerTotal")} value={playerTotalDamage} />
       </div>
 
       <div className={styles.bossShards}>
-        <h4 className={styles.sectionTitle}>Boss HP</h4>
+        <h4 className={styles.sectionTitle}>{t("boss.hp")}</h4>
         <div className={styles.bossHpBar}>
           <div
             className={styles.bossHpFill}
@@ -2445,25 +2474,27 @@ function BossContent({
           />
         </div>
         <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Damage Dealt</span>
+          <span className={styles.metaLabel}>{t("boss.damageDealt")}</span>
           <span className={styles.metaValue}>
             {totalBossDamage} / {bossHp}
-            {bossDefeated && " DEFEATED"}
+            {bossDefeated && ` ${t("boss.defeated")}`}
           </span>
         </div>
         <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Participants</span>
+          <span className={styles.metaLabel}>{t("boss.participants")}</span>
           <span className={styles.metaValue}>{onChain?.participantCount ?? 0}</span>
         </div>
-        <h4 className={styles.sectionTitle}>Shard Progress</h4>
+        <h4 className={styles.sectionTitle}>{t("boss.shardProgress")}</h4>
         {(onChain?.bossShards ?? []).map((shard) => (
           <div
             key={shard.index}
             className={`${styles.shardRow} ${shard.index === selectedBossShardIndex ? styles.shardRowActive : ""}`}
           >
-            <span className={styles.metaLabel}>Shard #{shard.index}</span>
+            <span className={styles.metaLabel}>{t("boss.shard", { index: shard.index })}</span>
             <span className={styles.metaValue}>
-              {shard.initialized ? `${shard.totalDamage} dmg (${shard.participantCount} players)` : "Missing"}
+              {shard.initialized
+                ? t("boss.shardValue", { damage: shard.totalDamage, players: shard.participantCount })
+                : t("common.missing")}
             </span>
           </div>
         ))}
@@ -2473,28 +2504,32 @@ function BossContent({
         <ConnectWalletAction />
       ) : !hasPlayerRun ? (
         <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
-          Enter Dungeon
+          {t("dungeon.actions.enter")}
         </button>
       ) : !raidEnabled ? (
         <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
-          Deprecated Boss POI
+          {t("boss.deprecatedPoi")}
         </button>
       ) : selectedBossShardIndex === null ? (
         <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
-          Boss Shard Unavailable
+          {t("boss.shardUnavailable")}
         </button>
       ) : !requiredShard?.initialized ? (
         <button className={styles.btnInit} onClick={onInitBossShard} disabled={txPending !== null} style={{ marginTop: 8 }}>
-          {txPending === "initBossShard" ? "Initializing Boss Shard..." : "Init Boss Shard"}
+          {txPending === "initBossShard" ? t("boss.initializingShard") : t("boss.initShard")}
+        </button>
+      ) : alreadyChallenged ? (
+        <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
+          {t("boss.alreadyChallenged")}
         </button>
       ) : (
         <BattleArena
-          title="Boss Raid"
+          title={t("boss.raid")}
           encounterKind="boss"
           enemyName={onChain?.bossName ?? boss.name}
           phase={bossBattlePhase}
           txPending={txPending !== null}
-          idleActionLabel="Open Raid"
+          idleActionLabel={t("battle.openRaid")}
           onStart={onStartBossBattle}
           onSubmit={onSubmitBossDamage}
           onRetry={onStartBossBattle}
@@ -2505,8 +2540,8 @@ function BossContent({
 
       {lastDamage !== null && (
         <div className={styles.raidReceipt}>
-          <span>Raid receipt</span>
-          <strong>Damage Score {lastDamage}</strong>
+          <span>{t("boss.raidReceipt")}</span>
+          <strong>{t("boss.damageScore", { damage: lastDamage })}</strong>
           {bossBattlePhase.phase === "success" && (
             <TxExplorerLink signature={bossBattlePhase.signature} />
           )}
@@ -2514,29 +2549,29 @@ function BossContent({
       )}
 
       <div className={styles.detailMeta}>
-        <span className={styles.metaLabel}>Claim Boss NFT eligibility</span>
+        <span className={styles.metaLabel}>{t("battle.bossNftEligibility")}</span>
         <span className={styles.metaValue}>
           {onChain?.bossNftClaimed
-            ? "Claimed"
+            ? t("common.claimed")
             : hasMinimumContribution
-              ? "Eligible"
-              : `Needs ${MINIMUM_BOSS_NFT_DAMAGE} damage`}
+              ? t("common.eligible")
+              : t("boss.needsDamageAmount", { damage: MINIMUM_BOSS_NFT_DAMAGE })}
         </span>
       </div>
-      {onChain?.bossNftClaimed && <div className={styles.initialized}>Claimed</div>}
+      {onChain?.bossNftClaimed && <div className={styles.initialized}>{t("common.claimed")}</div>}
       {!onChain?.bossNftClaimed && canClaimBossNft && bossNftClaimPhase.phase === "idle" && (
         <button className={styles.btnBossClaim} onClick={onClaimBossNft} disabled={txPending !== null} style={{ marginTop: 8 }}>
-          Claim Boss NFT
+          {t("boss.claimNft")}
         </button>
       )}
       {bossNftClaimPhase.phase === "submitting" && (
         <div className={styles.battleSimulating}>
           <div className={styles.spinner} />
-          <span>Claiming boss participation...</span>
+          <span>{t("boss.claimingParticipation")}</span>
         </div>
       )}
       {bossNftClaimPhase.phase === "success" && (
-        <div className={styles.initialized}>Claim recorded: <TxExplorerLink signature={bossNftClaimPhase.signature} /></div>
+        <div className={styles.initialized}>{t("boss.claimRecorded")} <TxExplorerLink signature={bossNftClaimPhase.signature} /></div>
       )}
       {bossNftClaimPhase.phase === "error" && <div className={styles.battleError}>❌ {bossNftClaimPhase.message}</div>}
     </div>
@@ -2568,6 +2603,7 @@ function TreasureContent({
   readonly hasPlayerRun: boolean;
   readonly txPending: TxPending;
 }) {
+  const { t } = useI18n();
   const tier = spec.rewardTier ?? RewardTier.Common;
   const sourceRef = treasureSourceRef(spec);
   const previewItem = playerPubkey
@@ -2594,44 +2630,44 @@ function TreasureContent({
   return (
     <div className={styles.treasureStack}>
       <div className={styles.detailCard}>
-        <h3 className={styles.sectionTitle}>Chain Reward / NFT Claim</h3>
+        <h3 className={styles.sectionTitle}>{t("treasure.chainReward")}</h3>
         <p className={styles.mvpNotice}>
-          NFT reward is chain-recorded. Backpack item is local MVP inventory.
+          {t("treasure.mvpNotice")}
         </p>
         <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Reward Tier</span>
+          <span className={styles.metaLabel}>{t("dungeon.labels.rewardTier")}</span>
           <span className={styles.metaValue} style={{ color: rewardTierColor(tier) }}>
             {tier}
           </span>
         </div>
         <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Claimed</span>
-          <span className={styles.metaValue}>{onChain?.dailyRewardClaimed ? "Yes" : "No"}</span>
+          <span className={styles.metaLabel}>{t("common.claimed")}</span>
+          <span className={styles.metaValue}>{onChain?.dailyRewardClaimed ? t("common.yes") : t("common.no")}</span>
         </div>
         <div className={styles.detailMeta}>
           <span className={styles.metaLabel}>NFT / cNFT</span>
-          <span className={styles.metaValue}>Daily reward claim record</span>
+          <span className={styles.metaValue}>{t("treasure.nftRecord")}</span>
         </div>
         {dailyRewardPhase.phase === "success" && (
-          <div className={styles.initialized}>tx signature: <TxExplorerLink signature={dailyRewardPhase.signature} /></div>
+          <div className={styles.initialized}>{t("treasure.txSignature")} <TxExplorerLink signature={dailyRewardPhase.signature} /></div>
         )}
 
         {onChain?.dailyRewardClaimed ? (
-          <div className={styles.initialized}>Claimed</div>
+          <div className={styles.initialized}>{t("common.claimed")}</div>
         ) : !walletConnected ? (
           <ConnectWalletAction />
         ) : !hasPlayerRun ? (
           <button className={styles.btnSecondary} disabled style={{ marginTop: 8 }}>
-            Enter Dungeon
+            {t("dungeon.actions.enter")}
           </button>
         ) : dailyRewardPhase.phase === "idle" ? (
           <button className={styles.btnClear} onClick={onClaimDailyReward} disabled={txPending !== null} style={{ marginTop: 8 }}>
-            Claim NFT + Backpack Item
+            {t("treasure.claim")}
           </button>
         ) : dailyRewardPhase.phase === "submitting" ? (
           <div className={styles.battleSimulating}>
             <div className={styles.spinner} />
-            <span>Claiming daily reward...</span>
+            <span>{t("treasure.claiming")}</span>
           </div>
         ) : dailyRewardPhase.phase === "error" ? (
           <div className={styles.battleError}>❌ {dailyRewardPhase.message}</div>
@@ -2639,7 +2675,7 @@ function TreasureContent({
       </div>
 
       <div className={styles.detailCard}>
-        <h3 className={styles.sectionTitle}>Backpack Item Reward</h3>
+        <h3 className={styles.sectionTitle}>{t("backpack.rewardTitle")}</h3>
         <div className={styles.rewardPreviewCard}>
           <span className={styles.shopItemIcon} aria-hidden="true">
             {itemIcon(previewDefinition)}
@@ -2651,12 +2687,12 @@ function TreasureContent({
           </div>
         </div>
         <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Added Locally</span>
-          <span className={styles.metaValue}>{hasBackpackItem ? "Yes" : "No"}</span>
+          <span className={styles.metaLabel}>{t("backpack.addedLocally")}</span>
+          <span className={styles.metaValue}>{hasBackpackItem ? t("common.yes") : t("common.no")}</span>
         </div>
         {canRestore && (
           <button className={styles.btnInit} onClick={onRestoreTreasureItem} disabled={txPending !== null} style={{ marginTop: 8 }}>
-            Restore Backpack Item
+            {t("backpack.restore")}
           </button>
         )}
       </div>

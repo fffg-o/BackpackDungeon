@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import "./globals.css";
+import { I18nProvider } from "./i18n/I18nProvider";
+import { LanguageToggle, LocalizedNavLinks } from "./i18n/LanguageToggle";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
@@ -17,15 +18,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <nav className="nav">
-          <Link href="/" className="navLink">
-            🏠 Home
-          </Link>
-          <Link href="/dungeon" className="navLink">
-            🗺️ Daily Dungeon
-          </Link>
-        </nav>
-        <Providers>{children}</Providers>
+        <I18nProvider>
+          <nav className="nav">
+            <LocalizedNavLinks />
+            <LanguageToggle />
+          </nav>
+          <Providers>{children}</Providers>
+        </I18nProvider>
       </body>
     </html>
   );

@@ -1,4 +1,7 @@
+"use client";
+
 import type { BattleLogEntryV1 } from "@backpack-dungeon/game-core";
+import { useI18n } from "../../i18n/useI18n";
 import styles from "../dungeon.module.css";
 
 export interface CombatLogProps {
@@ -7,6 +10,7 @@ export interface CombatLogProps {
 }
 
 export function CombatLog({ log, replayIndex }: CombatLogProps) {
+  const { t } = useI18n();
   const visibleEntries = log.slice(0, Math.max(0, replayIndex) + 1);
 
   if (visibleEntries.length === 0) {
@@ -24,9 +28,9 @@ export function CombatLog({ log, replayIndex }: CombatLogProps) {
         >
           <span className={styles.logTurn}>T{entry.turn}</span>
           <span className={entry.actor === "player" ? styles.logPlayer : styles.logEnemy}>
-            {entry.actor === "player" ? "Player" : "Enemy"}
+            {entry.actor === "player" ? t("battle.actors.player") : t("battle.actors.enemy")}
           </span>
-          <span className={styles.logDamage}>{formatDamage(entry)}</span>
+          <span className={styles.logDamage}>{formatDamage(entry, t)}</span>
           <span className={styles.logHp}>
             HP {entry.playerHpAfter}/{entry.enemyHpAfter}
           </span>
@@ -36,14 +40,17 @@ export function CombatLog({ log, replayIndex }: CombatLogProps) {
   );
 }
 
-function formatDamage(entry: BattleLogEntryV1): string {
+function formatDamage(
+  entry: BattleLogEntryV1,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
   if (entry.dodged) {
-    return "DODGE";
+    return t("battle.actions.dodge");
   }
 
   if (entry.damage === 0) {
-    return entry.actor === "player" ? "Blocked" : "Miss";
+    return entry.actor === "player" ? t("battle.actions.blocked") : t("battle.actions.miss");
   }
 
-  return `${entry.critical ? "CRIT " : ""}${entry.damage}`;
+  return `${entry.critical ? `${t("battle.actions.crit")} ` : ""}${entry.damage}`;
 }

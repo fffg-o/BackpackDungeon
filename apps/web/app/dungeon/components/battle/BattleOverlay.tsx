@@ -12,6 +12,7 @@ import { BattleResultSummary } from "./BattleResultSummary";
 import { BattleSetupPanel } from "./BattleSetupPanel";
 import { BattleStage } from "./BattleStage";
 import { BattleTimeline } from "./BattleTimeline";
+import { useI18n } from "../../../i18n/useI18n";
 import styles from "./battle.module.css";
 
 export type BattleOverlayPhase =
@@ -82,6 +83,7 @@ export function BattleOverlay({
   bossPlayerTotalDamageAfterSubmit,
   bossNftEligible,
 }: BattleOverlayProps) {
+  const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const startButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -93,13 +95,13 @@ export function BattleOverlay({
   const startDisabled =
     phase.phase !== "setup" || startBlocked || cooldownSeconds > 0 || energyMissing;
   const startLabel = cooldownSeconds > 0
-    ? `Cooldown ${formatCooldown(cooldownSeconds)}`
+    ? `${t("common.cooldown")} ${formatCooldown(cooldownSeconds, t("common.ready"))}`
     : energyMissing
-      ? "Not enough energy"
+      ? t("dungeon.errors.notEnoughEnergy")
       : encounterKind === "boss"
-        ? "Start Raid"
-        : "Start Auto Battle";
-  const submitLabel = encounterKind === "boss" ? "Submit Boss Damage" : "Submit Clear Enemy";
+        ? t("battle.startRaid")
+        : t("battle.start");
+  const submitLabel = encounterKind === "boss" ? t("battle.submitBossDamage") : t("battle.submitClear");
   const handleClose = useCallback(() => {
     if (canClose) {
       onClose();
@@ -186,9 +188,9 @@ export function BattleOverlay({
             playerStats={playerStats}
             enemyStats={enemyStats}
           />
-          <aside className={styles.sidePanel} aria-label="Combat log and result">
+          <aside className={styles.sidePanel} aria-label={t("battle.combatLog")}>
             <div className={styles.panelHeader}>
-              <h3 className={styles.panelTitle}>Combat Log</h3>
+              <h3 className={styles.panelTitle}>{t("battle.combatLog")}</h3>
             </div>
             <BattleTimeline phase={phase} />
             <BattleResultSummary
@@ -269,8 +271,8 @@ function getFocusable(dialog: HTMLDivElement): HTMLElement[] {
   ).filter((element) => !element.hasAttribute("disabled") && element.tabIndex >= 0);
 }
 
-function formatCooldown(seconds: number): string {
-  if (seconds <= 0) return "Ready";
+function formatCooldown(seconds: number, readyLabel = "Ready"): string {
+  if (seconds <= 0) return readyLabel;
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}m ${s}s`;

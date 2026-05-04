@@ -16,4 +16,4 @@ cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "node tests/packrun.test.mjs"
+test = "solana program show Hj9xusyzfxP8ic9U6rmpGcY4pPGFBJQqm7BUJ4w475jU --url http://127.0.0.1:8899 >/dev/null 2>&1 || solana program deploy target/deploy/packrun.so --program-id target/deploy/packrun-keypair.json --url http://127.0.0.1:8899 && node tests/packrun.test.mjs"

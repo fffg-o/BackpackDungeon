@@ -1,7 +1,10 @@
+"use client";
+
 import type { BattleCombatantStatsV1, BattleResultV1 } from "@backpack-dungeon/game-core";
 import { HpBar } from "../HpBar";
 import { FloatingDamageText } from "./FloatingDamageText";
 import type { BattleOverlayPhase } from "./BattleOverlay";
+import { useI18n } from "../../../i18n/useI18n";
 import styles from "./battle.module.css";
 
 export interface BattleStageProps {
@@ -21,6 +24,7 @@ export function BattleStage({
   playerStats,
   enemyStats,
 }: BattleStageProps) {
+  const { t } = useI18n();
   const result = phaseHasResult(phase) ? phase.result : null;
   const replayIndex =
     phase.phase === "replaying"
@@ -35,11 +39,11 @@ export function BattleStage({
   return (
     <section
       className={`${styles.stagePanel} ${activeItemTrigger ? styles.itemGlow : ""}`}
-      aria-label="Battle stage"
+      aria-label={t("battle.stage")}
     >
       <div className={styles.stageTopline}>
-        <h3 className={styles.stageTitle}>Hero vs Enemy</h3>
-        <span className={styles.stagePhase}>{stagePhaseLabel(phase)}</span>
+        <h3 className={styles.stageTitle}>{t("battle.stageTitle")}</h3>
+        <span className={styles.stagePhase}>{stagePhaseLabel(phase, t)}</span>
       </div>
 
       <div className={styles.fighters}>
@@ -68,7 +72,7 @@ export function BattleStage({
         {activeEntry && activeEntry.damage > 0 && (
           <FloatingDamageText
             key={`${activeEntry.turn}-${activeEntry.action}-damage`}
-            text={formatFloatingDamage(activeEntry)}
+            text={formatFloatingDamage(activeEntry, t)}
             side={activeEntry.actor === "player" ? "enemy" : "player"}
             critical={activeEntry.critical}
             dodged={activeEntry.dodged}
@@ -77,7 +81,7 @@ export function BattleStage({
         {activeEntry && activeEntry.dodged && activeEntry.damage <= 0 && (
           <FloatingDamageText
             key={`${activeEntry.turn}-${activeEntry.action}-dodge`}
-            text="DODGE"
+            text={t("battle.actions.dodge")}
             side={activeEntry.actor === "player" ? "enemy" : "player"}
             dodged
             variant="dodge"
@@ -94,7 +98,7 @@ export function BattleStage({
         {activeEntry && (activeEntry.shieldDelta ?? 0) > 0 && (
           <FloatingDamageText
             key={`${activeEntry.turn}-${activeEntry.action}-shield`}
-            text={`+${activeEntry.shieldDelta} shield`}
+            text={t("battle.actions.shield", { amount: activeEntry.shieldDelta ?? 0 })}
             side="player"
             variant="shield"
           />
@@ -197,20 +201,26 @@ function phaseHasResult(
   return "result" in phase;
 }
 
-function stagePhaseLabel(phase: BattleOverlayPhase): string {
-  if (phase.phase === "setup") return "Setup";
-  if (phase.phase === "preparing") return "Preparing";
+function stagePhaseLabel(
+  phase: BattleOverlayPhase,
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  if (phase.phase === "setup") return t("common.setup");
+  if (phase.phase === "preparing") return t("common.preparing");
   if (phase.phase === "replaying") {
     return `${phase.replayIndex + 1} / ${Math.max(1, phase.result.log.length)}`;
   }
-  if (phase.phase === "submitting") return "Submitting to chain";
-  if (phase.phase === "success") return "Recorded";
-  if (phase.phase === "error") return "Needs attention";
-  return phase.result.won ? "Victory" : "Defeated";
+  if (phase.phase === "submitting") return t("battle.status.submittingToChain");
+  if (phase.phase === "success") return t("common.recorded");
+  if (phase.phase === "error") return t("common.attention");
+  return phase.result.won ? t("common.victory") : t("common.defeated");
 }
 
-function formatFloatingDamage(entry: BattleResultV1["log"][number]): string {
-  if (entry.dodged) return "DODGE";
+function formatFloatingDamage(
+  entry: BattleResultV1["log"][number],
+  t: ReturnType<typeof useI18n>["t"],
+): string {
+  if (entry.dodged) return t("battle.actions.dodge");
   if (entry.damage <= 0) return "0";
-  return `${entry.critical ? "CRIT " : ""}${entry.damage}`;
+  return `${entry.critical ? `${t("battle.actions.crit")} ` : ""}${entry.damage}`;
 }

@@ -1,3 +1,5 @@
+"use client";
+
 import {
   BACKPACK_ITEM_DEFINITIONS,
   computeBackpackCombatEffects,
@@ -5,6 +7,7 @@ import {
   type BackpackItemInstanceV1,
   type BackpackLayoutV1,
 } from "@backpack-dungeon/game-core";
+import { useI18n } from "../../../i18n/useI18n";
 import styles from "./battle.module.css";
 
 export interface BackpackStatsPreviewProps {
@@ -13,26 +16,27 @@ export interface BackpackStatsPreviewProps {
 }
 
 export function BackpackStatsPreview({ inventory, layout }: BackpackStatsPreviewProps) {
+  const { t } = useI18n();
   const effects = safeComputeEffects(inventory, layout);
   const triggerText = [
-    effects.battleStartDamageFlat > 0 ? `${effects.battleStartDamageFlat} battle dmg` : null,
-    effects.lowHealthHealFlat > 0 ? `${effects.lowHealthHealFlat} low HP heal` : null,
-    effects.shieldFlat > 0 ? `${effects.shieldFlat} shield` : null,
+    effects.battleStartDamageFlat > 0 ? t("backpack.battleDamage", { amount: effects.battleStartDamageFlat }) : null,
+    effects.lowHealthHealFlat > 0 ? t("backpack.lowHpHeal", { amount: effects.lowHealthHealFlat }) : null,
+    effects.shieldFlat > 0 ? t("backpack.shield", { amount: effects.shieldFlat }) : null,
   ]
     .filter(Boolean)
     .join(" / ");
   const synergyCount = effects.notes.filter((note) => note.includes("adjacent")).length;
 
   return (
-    <section className={styles.statsPreview} aria-label="Backpack stats preview">
-      <h4 className={styles.inventoryGroupTitle}>Stats Preview</h4>
+    <section className={styles.statsPreview} aria-label={t("backpack.statsPreviewAria")}>
+      <h4 className={styles.inventoryGroupTitle}>{t("backpack.statsPreview")}</h4>
       <div className={styles.statsPreviewGrid}>
-        <PreviewStat label="Attack bonus" value={`+${effects.attackFlat}`} />
-        <PreviewStat label="Defense bonus" value={`+${effects.defenseFlat}`} />
-        <PreviewStat label="Max HP bonus" value={`+${effects.maxHealthFlat}`} />
-        <PreviewStat label="Crit bonus" value={`+${effects.critBpsFlat} bps`} />
-        <PreviewStat label="Trigger effects" value={triggerText || "None"} />
-        <PreviewStat label="Synergy count" value={synergyCount} />
+        <PreviewStat label={t("backpack.attackBonus")} value={`+${effects.attackFlat}`} />
+        <PreviewStat label={t("backpack.defenseBonus")} value={`+${effects.defenseFlat}`} />
+        <PreviewStat label={t("backpack.maxHpBonus")} value={`+${effects.maxHealthFlat}`} />
+        <PreviewStat label={t("backpack.critBonus")} value={`+${effects.critBpsFlat} bps`} />
+        <PreviewStat label={t("backpack.triggerEffects")} value={triggerText || t("common.none")} />
+        <PreviewStat label={t("backpack.synergyCount")} value={synergyCount} />
       </div>
     </section>
   );

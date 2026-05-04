@@ -1,3 +1,5 @@
+"use client";
+
 import type {
   BattleCombatantStatsV1,
   BattleResultV1,
@@ -7,6 +9,7 @@ import { CombatLog } from "./CombatLog";
 import { HpBar } from "./HpBar";
 import { StatPill } from "./StatPill";
 import { TxStatusCard } from "./TxStatusCard";
+import { useI18n } from "../../i18n/useI18n";
 import styles from "../dungeon.module.css";
 
 export type BattleArenaPhase =
@@ -42,7 +45,7 @@ export interface BattleArenaProps {
 export function BattleArena({
   title,
   encounterKind,
-  playerName = "Player",
+  playerName,
   enemyName,
   playerStats,
   enemyStats,
@@ -59,6 +62,8 @@ export function BattleArena({
   explorerUrl,
   shortSignature,
 }: BattleArenaProps) {
+  const { t } = useI18n();
+  const displayPlayerName = playerName ?? t("common.player");
   const result = "result" in phase ? phase.result : null;
   const activeReplayIndex =
     phase.phase === "replaying"
@@ -74,16 +79,16 @@ export function BattleArena({
     playerEnergy < energyCost;
   const startDisabled = txPending || cooldownActive || energyMissing;
   const startLabel = cooldownActive
-    ? `Cooldown ${formatCooldown(cooldownSeconds)}`
+    ? `${t("common.cooldown")} ${formatCooldown(cooldownSeconds, t("common.ready"))}`
     : energyMissing
-      ? "Not enough energy"
-      : idleActionLabel ?? (encounterKind === "boss" ? "Start Boss Battle" : "Start Battle");
+      ? t("dungeon.errors.notEnoughEnergy")
+      : idleActionLabel ?? (encounterKind === "boss" ? t("battle.startBoss") : t("battle.startBattle"));
 
   return (
     <div className={styles.battleArena}>
       <h3 className={styles.sectionTitle}>{title}</h3>
       <div className={styles.arenaHeader}>
-        <span className={styles.arenaCombatant}>{playerName}</span>
+        <span className={styles.arenaCombatant}>{displayPlayerName}</span>
         <span className={styles.arenaVs}>VS</span>
         <span className={styles.arenaCombatant}>{enemyName}</span>
       </div>
@@ -93,7 +98,7 @@ export function BattleArena({
           <HpBar
             current={hpSnapshot.playerCurrent}
             max={hpSnapshot.playerMax}
-            label={playerName}
+            label={displayPlayerName}
             variant="player"
           />
           <HpBar
@@ -117,6 +122,7 @@ export function BattleArena({
         onRetry,
         explorerUrl,
         shortSignature,
+        t,
       })}
     </div>
   );
@@ -134,6 +140,7 @@ function renderPhaseBody(params: {
   readonly onRetry: () => void;
   readonly explorerUrl?: (signature: string) => string;
   readonly shortSignature?: (signature: string) => string;
+  readonly t: ReturnType<typeof useI18n>["t"];
 }) {
   const {
     encounterKind,
@@ -147,6 +154,7 @@ function renderPhaseBody(params: {
     onRetry,
     explorerUrl,
     shortSignature,
+    t,
   } = params;
 
   if (phase.phase === "idle") {
@@ -161,7 +169,7 @@ function renderPhaseBody(params: {
     return (
       <div className={styles.battleSimulating}>
         <div className={styles.spinner} />
-        <span>{encounterKind === "boss" ? "Preparing boss battle..." : "Preparing battle..."}</span>
+        <span>{encounterKind === "boss" ? t("battle.preparingBoss") : t("battle.preparingBattle")}</span>
       </div>
     );
   }
@@ -170,7 +178,7 @@ function renderPhaseBody(params: {
     return (
       <div className={styles.battleResult}>
         <div className={styles.detailMeta}>
-          <span className={styles.metaLabel}>Replay</span>
+          <span className={styles.metaLabel}>{t("battle.status.autoBattle")}</span>
           <span className={styles.metaValue}>
             {Math.min(activeReplayIndex + 1, phase.result.log.length)} / {phase.result.log.length}
           </span>
@@ -200,7 +208,7 @@ function renderPhaseBody(params: {
       <TxStatusCard
         status={{
           phase: "submitting",
-          label: encounterKind === "boss" ? "Submitting boss damage..." : "Submitting clear...",
+          label: encounterKind === "boss" ? t("battle.submittingBossDamage") : t("battle.submittingClear"),
         }}
       />
     );
@@ -213,8 +221,8 @@ function renderPhaseBody(params: {
           phase: "success",
           label:
             encounterKind === "boss" && phase.damage !== undefined
-              ? `Submitted ${phase.damage}`
-              : "Cleared",
+              ? t("boss.damageSubmitted", { damage: phase.damage })
+              : t("battle.clearEnemy"),
           signature: phase.signature,
         }}
         explorerUrl={explorerUrl}
@@ -245,6 +253,7 @@ function BattleResultPanel({
   readonly onSubmit: () => void;
   readonly onRetry: () => void;
 }) {
+  const { t } = useI18n();
   const submitEnabled =
     encounterKind === "boss" ? result.bossDamageScore > 0 : result.won;
   const damageValue = encounterKind === "boss" ? damage ?? result.bossDamageScore : result.playerDamageDealt;
@@ -252,10 +261,10 @@ function BattleResultPanel({
   return (
     <div className={styles.battleResult}>
       <div className={styles.pillRow}>
-        <StatPill label="Outcome" value={result.won ? "Victory" : "Defeated"} />
-        <StatPill label="Turns" value={result.turnsTaken} />
-        <StatPill label="Taken" value={result.damageTaken} />
-        <StatPill label="Dealt" value={damageValue} />
+        <StatPill label={t("battle.outcome")} value={result.won ? t("common.victory") : t("common.defeated")} />
+        <StatPill label={t("battle.turns")} value={result.turnsTaken} />
+        <StatPill label={t("battle.damageTaken")} value={result.damageTaken} />
+        <StatPill label={t("battle.damageDealt")} value={damageValue} />
       </div>
       <CombatLog log={result.log} replayIndex={replayIndex} />
       {submitEnabled ? (
@@ -263,25 +272,25 @@ function BattleResultPanel({
           <ActionButton onClick={onSubmit} disabled={txPending}>
             {txPending
               ? encounterKind === "boss"
-                ? "Submitting Boss Damage..."
-                : "Submitting Clear Enemy..."
+                ? t("battle.submittingBossDamage")
+                : t("battle.submittingClear")
               : encounterKind === "boss"
-                ? "Submit Boss Damage"
-                : "Submit Clear Enemy"}
+                ? t("battle.submitBossDamage")
+                : t("battle.submitClear")}
           </ActionButton>
           {encounterKind === "boss" && (
             <ActionButton onClick={onStart} disabled={txPending} variant="secondary">
-              Retry
+              {t("common.retry")}
             </ActionButton>
           )}
         </div>
       ) : (
         <div className={styles.buttonRow}>
           <ActionButton onClick={onStart} disabled={txPending}>
-            Retry
+            {t("common.retry")}
           </ActionButton>
           <ActionButton onClick={onRetry} disabled={txPending} variant="secondary">
-            Close
+            {t("common.close")}
           </ActionButton>
         </div>
       )}
@@ -320,8 +329,8 @@ function maxObservedHp(result: BattleResultV1, actor: "player" | "enemy"): numbe
   return Math.max(1, ...values);
 }
 
-function formatCooldown(seconds: number): string {
-  if (seconds <= 0) return "Ready";
+function formatCooldown(seconds: number, readyLabel = "Ready"): string {
+  if (seconds <= 0) return readyLabel;
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}m ${s}s`;

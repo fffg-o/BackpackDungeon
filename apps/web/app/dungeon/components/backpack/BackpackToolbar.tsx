@@ -1,5 +1,6 @@
 "use client";
 
+import { useI18n } from "../../../i18n/useI18n";
 import styles from "./backpack.module.css";
 
 export interface BackpackToolbarProps {
@@ -15,10 +16,11 @@ export function BackpackToolbar({
   onRotate,
   rotateDisabled = false,
 }: BackpackToolbarProps) {
+  const { t } = useI18n();
   return (
     <div className={styles.toolbar}>
       <button type="button" className={styles.toolbarButton} onClick={onAutoPack}>
-        Auto Pack
+        {t("backpack.autoPack")}
       </button>
       {onRotate && (
         <button
@@ -27,12 +29,12 @@ export function BackpackToolbar({
           onClick={onRotate}
           disabled={rotateDisabled}
         >
-          Rotate
+          {t("backpack.rotate")}
         </button>
       )}
       {onResetBackpack && (
         <button type="button" className={styles.toolbarButton} onClick={onResetBackpack}>
-          Reset Layout
+          {t("backpack.reset")}
         </button>
       )}
     </div>
